@@ -1,0 +1,13 @@
+pandas
+numpy
+scikit-learn
+statsmodels
+seaborn
+matplotlib
+prophet
+xgboost
+scipy
+dtaidistance
+darts
+torch
+tensorflow 
