@@ -11,3 +11,6 @@ dtaidistance
 darts
 torch
 tensorflow 
+pyts
+psutil
+pytorch-lightning

@@ -3,7 +3,7 @@
 Improved Time Series Experiment Runner
 
 This script implements the new iterative methodology for evaluating time series 
-repair and forecasting methods as requested:
+repair and forecasting methods:
 
 1. Split dataset into train/test (test = last 10 points)
 2. For each iteration:
@@ -28,6 +28,7 @@ Usage examples:
 
 import sys
 import argparse
+import pandas as pd
 from iterative_experiment import IterativeExperiment
 
 def run_quick_experiment():
@@ -40,17 +41,23 @@ def run_quick_experiment():
     print()
     
     experiment = IterativeExperiment(
-        data_path="data/1_clean/train_set_original.csv",
-        n_iterations=3,
+        data_paths=["data/0_source_data/boiler_outlet_temp_univ.csv",
+                   "data/0_source_data/pump_sensor_28_univ.csv",
+                   "data/0_source_data/vibration_sensor_S1.csv"],
+        n_iterations=10,
         inpainting_models=["gaf-unet"],
         forecasting_models=["XGBoost"],
         missingness_types=["MCAR", "MAR", "MNAR"],
         test_size=10,
-        missingness_rate=0.2,
+        missingness_rates=[0.02, 0.05, 0.10],  # 2%, 5%, 10%
         output_dir="results/quick_experiment"
     )
     
     results = experiment.run_experiment()
+    
+    # Get the final dataframe
+    df_final = experiment.get_final_dataframe()
+    
     experiment.create_performance_plots(results)
     experiment.perform_statistical_tests(results)
     experiment.perform_bonferroni_correction(results)
@@ -60,8 +67,11 @@ def run_quick_experiment():
     print("QUICK EXPERIMENT COMPLETED!")
     print("="*60)
     print(f"Results saved to: results/quick_experiment")
+    print(f"Final dataframe shape: {df_final.shape}")
     print("Check the plots/ directory for visualizations")
     print("Check statistical_tests/ for t-test, Bonferroni, and ANOVA results")
+    
+    return df_final
 
 def run_medium_experiment():
     """Run a medium-sized experiment with multiple models"""
@@ -73,17 +83,23 @@ def run_medium_experiment():
     print()
     
     experiment = IterativeExperiment(
-        data_path="data/1_clean/train_set_original.csv",
+        data_paths=["data/0_source_data/boiler_outlet_temp_univ.csv",
+                   "data/0_source_data/pump_sensor_28_univ.csv",
+                   "data/0_source_data/vibration_sensor_S1.csv"],
         n_iterations=5,
         inpainting_models=["gaf-unet", "mtf-unet"],
         forecasting_models=["XGBoost", "Prophet"],
         missingness_types=["MCAR", "MAR", "MNAR"],
         test_size=10,
-        missingness_rate=0.2,
+        missingness_rates=[0.02, 0.05, 0.10],  # 2%, 5%, 10%
         output_dir="results/medium_experiment"
     )
     
     results = experiment.run_experiment()
+    
+    # Get the final dataframe
+    df_final = experiment.get_final_dataframe()
+    
     experiment.create_performance_plots(results)
     experiment.perform_statistical_tests(results)
     experiment.perform_bonferroni_correction(results)
@@ -93,6 +109,9 @@ def run_medium_experiment():
     print("MEDIUM EXPERIMENT COMPLETED!")
     print("="*60)
     print(f"Results saved to: results/medium_experiment")
+    print(f"Final dataframe shape: {df_final.shape}")
+    
+    return df_final
 
 def run_full_experiment():
     """Run the complete experiment with all available models"""
@@ -109,17 +128,23 @@ def run_full_experiment():
         return
     
     experiment = IterativeExperiment(
-        data_path="data/1_clean/train_set_original.csv",
+        data_paths=["data/0_source_data/boiler_outlet_temp_univ.csv",
+                   "data/0_source_data/pump_sensor_28_univ.csv",
+                   "data/0_source_data/vibration_sensor_S1.csv"],
         n_iterations=10,
         inpainting_models=["gaf-unet", "mtf-unet", "rp-unet", "spec-unet"],
         forecasting_models=["XGBoost", "Prophet", "SARIMAX", "HoltWinters"],
         missingness_types=["MCAR", "MAR", "MNAR"],
         test_size=10,
-        missingness_rate=0.2,
+        missingness_rates=[0.02, 0.05, 0.10],  # 2%, 5%, 10%
         output_dir="results/full_experiment"
     )
     
     results = experiment.run_experiment()
+    
+    # Get the final dataframe
+    df_final = experiment.get_final_dataframe()
+    
     experiment.create_performance_plots(results)
     experiment.perform_statistical_tests(results)
     experiment.perform_bonferroni_correction(results)
@@ -129,6 +154,9 @@ def run_full_experiment():
     print("FULL EXPERIMENT COMPLETED!")
     print("="*60)
     print(f"Results saved to: results/full_experiment")
+    print(f"Final dataframe shape: {df_final.shape}")
+    
+    return df_final
 
 def print_results_summary(results_dir):
     """Print a summary of what to look for in the results"""
@@ -190,14 +218,17 @@ def main():
                        help="Run full experiment (10 iterations, all models)")
     
     # Custom configuration options
-    parser.add_argument("--data", default="data/1_clean/train_set_original.csv",
-                       help="Path to the dataset")
+    parser.add_argument("--data", nargs='+', 
+                       default=["data/0_source_data/boiler_outlet_temp_univ.csv",
+                               "data/0_source_data/pump_sensor_28_univ.csv",
+                               "data/0_source_data/vibration_sensor_S1.csv"],
+                       help="Paths to the datasets (can specify multiple)")
     parser.add_argument("--iterations", type=int, default=5,
                        help="Number of iterations to run")
     parser.add_argument("--test_size", type=int, default=10,
                        help="Size of test set (last N points)")
-    parser.add_argument("--missingness_rate", type=float, default=0.2,
-                       help="Rate of missingness to introduce")
+    parser.add_argument("--missingness_rates", nargs='+', type=float, default=[0.02, 0.05, 0.10],
+                       help="Rates of missingness to introduce (e.g., 0.02 0.05 0.10)")
     parser.add_argument("--inpainting_models", nargs='+',
                        default=["gaf-unet"],
                        help="Inpainting models to use (gaf-unet, mtf-unet, rp-unet, spec-unet)")
@@ -223,12 +254,13 @@ def main():
     print("5. Comprehensive visualizations")
     print()
     
-    # Check if any data files exist
+    # Check if all data files exist
     import os
-    if not os.path.exists(args.data):
-        print(f"❌ Error: Data file not found: {args.data}")
-        print("Please ensure you have run the data preparation steps first.")
-        sys.exit(1)
+    for data_path in args.data:
+        if not os.path.exists(data_path):
+            print(f"❌ Error: Data file not found: {data_path}")
+            print("Please ensure you have run the data preparation steps first.")
+            sys.exit(1)
     
     # Run the appropriate experiment
     if args.quick:
@@ -253,22 +285,27 @@ def main():
         print()
         
         experiment = IterativeExperiment(
-            data_path=args.data,
+            data_paths=args.data,
             n_iterations=args.iterations,
             inpainting_models=args.inpainting_models,
             forecasting_models=args.forecasting_models,
             missingness_types=args.missingness_types,
             test_size=args.test_size,
-            missingness_rate=args.missingness_rate,
+            missingness_rates=args.missingness_rates,
             output_dir=args.output_dir
         )
         
         results = experiment.run_experiment()
+        
+        # Get the final dataframe
+        df_final = experiment.get_final_dataframe()
+        
         experiment.create_performance_plots(results)
         experiment.perform_statistical_tests(results)
         experiment.perform_bonferroni_correction(results)
         experiment.perform_repeated_measures_anova(results)
         
+        print(f"Final dataframe shape: {df_final.shape}")
         print_results_summary(args.output_dir)
 
 if __name__ == "__main__":

@@ -1,3 +1,6 @@
+## najwazniejszy plik
+##zrobic lucidcharty
+
 import os
 import pandas as pd
 import numpy as np
@@ -34,19 +37,29 @@ from ts_image_inpainting import process_series, ENCODERS, INPAINTERS, INVERTERS
 
 class IterativeExperiment:
     def __init__(self, 
-                 data_path: str = "data/1_clean/train_set_original.csv",
+                 ##zmienic zeby od razy 3 datasety wchodzily
+                 data_paths: List[str] = None,
                  test_size: int = 10,
                  n_iterations: int = 5,
                  inpainting_models: List[str] = None,
                  forecasting_models: List[str] = None,
                  missingness_types: List[str] = None,
-                 missingness_rate: float = 0.2,
+                 ## 3 rozne missingness rate zrobic
+                 missingness_rates: List[float] = None,
                  output_dir: str = "results/iterative_experiment"):
         
-        self.data_path = data_path
+        # Default data paths for the 3 datasets
+        if data_paths is None:
+            self.data_paths = [
+                "data/0_source_data/boiler_outlet_temp_univ.csv",
+                "data/0_source_data/pump_sensor_28_univ.csv", 
+                "data/0_source_data/vibration_sensor_S1.csv"
+            ]
+        else:
+            self.data_paths = data_paths
         self.test_size = test_size
         self.n_iterations = n_iterations
-        self.missingness_rate = missingness_rate
+        self.missingness_rates = missingness_rates or [0.02, 0.05, 0.10]  # Default: 2%, 5%, 10%
         self.output_dir = output_dir
         
         # Default configurations
@@ -62,10 +75,9 @@ class IterativeExperiment:
             "impute_mean", "impute_median", "impute_mode",
             "impute_ffill", "impute_bfill",
             "interpolate_nearest", "interpolate_linear", "interpolate_index",
-            "interpolate_quadratic", "interpolate_cubic", "interpolate_polynomial",
-            "interpolate_spline", "interpolate_pchip", "interpolate_akima",
-            "knn", "sarimax"
-        ]
+            "interpolate_quadratic", "interpolate_cubic", "interpolate_polynomial", "interpolate_pchip", "interpolate_akima"
+            #"knn", "sarimax"
+        ] #,"interpolate_spline"
         
         # Create output directories
         os.makedirs(self.output_dir, exist_ok=True)
@@ -73,6 +85,10 @@ class IterativeExperiment:
         os.makedirs(f"{self.output_dir}/metrics", exist_ok=True)
         os.makedirs(f"{self.output_dir}/plots", exist_ok=True)
         os.makedirs(f"{self.output_dir}/statistical_tests", exist_ok=True)
+        
+        # Create data processing directories
+        os.makedirs("data/1_missing_data", exist_ok=True)
+        os.makedirs("data/2_fixed_data", exist_ok=True)
         
         # Initialize timing and system tracking
         self.timing_data = {
@@ -171,40 +187,91 @@ class IterativeExperiment:
             }
         
     def _load_data(self):
-        """Load the original dataset and split into train/test"""
-        df = pd.read_csv(self.data_path, index_col=0)
-        self.full_data = df.iloc[:, 0]  # Assuming first column is the time series
+        """Load the 3 original datasets and split into train/test for each"""
+        self.full_data = []
+        self.train_data = []
+        self.test_data = []
+        self.original_dataframes = []  # NEW: Store original DataFrames with timestamps
         
-        # Split into train and test
-        self.train_data = self.full_data[:-self.test_size]
-        self.test_data = self.full_data[-self.test_size:]
+        dataset_names = ["boiler", "pump", "vibr"]
         
-        print(f"Loaded data: {len(self.full_data)} points")
-        print(f"Train set: {len(self.train_data)} points")
-        print(f"Test set: {len(self.test_data)} points")
+        for i, data_path in enumerate(self.data_paths):
+            try:
+                df = pd.read_csv(data_path, index_col=0)
+                series_data = df.iloc[:, 0]  # Assuming first column is the time series
+                
+                # Store the original DataFrame with timestamps for degradation
+                self.original_dataframes.append(df.copy())
+                
+                # CRITICAL FIX: Reset index to numeric for proper indexing
+                # Original index is datetime strings, but we need numeric indices
+                series_data = series_data.reset_index(drop=True)
+                
+                # Split into train and test
+                train_series = series_data[:-self.test_size]
+                test_series = series_data[-self.test_size:]
+                
+                self.full_data.append(series_data)
+                self.train_data.append(train_series)
+                self.test_data.append(test_series)
+                
+                print(f"Dataset {i+1} ({dataset_names[i]}):")
+                print(f"  - Loaded data: {len(series_data)} points")
+                print(f"  - Train set: {len(train_series)} points")
+                print(f"  - Test set: {len(test_series)} points")
+                print()
+                
+            except FileNotFoundError:
+                print(f"❌ Error: Data file not found: {data_path}")
+                raise
+            except Exception as e:
+                print(f"❌ Error loading dataset {i+1}: {e}")
+                raise
         
-    def generate_missingness(self, data: pd.Series, missingness_type: str, rate: float = None) -> pd.Series:
+        print(f"✅ Successfully loaded {len(self.full_data)} datasets")
+    
+    def clean_method_name(self, method_name: str) -> str:
+        """Clean method name by removing dashes and underscores for filename"""
+        return method_name.replace("-", "").replace("_", "")
+        
+    def generate_missingness(self, data: pd.Series, missingness_type: str, rate: float) -> pd.Series:
         """Generate missing values in the training data"""
-        if rate is None:
-            rate = self.missingness_rate
             
         data_copy = data.copy()
         n_missing = int(len(data) * rate)
         
+        # Clean data - remove any existing NaN or inf values
+        clean_data = data.dropna()
+        if len(clean_data) == 0:
+            raise ValueError("No valid data points after removing NaN/inf values")
+        
         if missingness_type == "MCAR":
             # Missing completely at random
-            missing_indices = np.random.choice(data.index, n_missing, replace=False)
+            missing_indices = np.random.choice(len(data), n_missing, replace=False)
         elif missingness_type == "MAR":
             # Missing at random - higher probability for certain value ranges
             # Missing more likely for higher values
-            probs = np.abs(data.values - data.median()) / np.abs(data.values - data.median()).sum()
-            missing_indices = np.random.choice(data.index, n_missing, replace=False, p=probs)
+            # Use original data for probability calculation, but handle NaN/inf
+            data_for_probs = data.fillna(data.median())  # Fill NaN with median for probability calculation
+            diff_from_median = np.abs(data_for_probs.values - data_for_probs.median())
+            
+            # Handle case where all values are the same or invalid
+            if diff_from_median.sum() == 0 or np.isnan(diff_from_median.sum()) or np.isinf(diff_from_median.sum()):
+                # If all values are the same or invalid, use uniform distribution
+                probs = np.ones(len(data)) / len(data)
+            else:
+                # Ensure no NaN or inf in probabilities
+                probs = diff_from_median / diff_from_median.sum()
+                if np.any(np.isnan(probs)) or np.any(np.isinf(probs)):
+                    probs = np.ones(len(data)) / len(data)
+            
+            missing_indices = np.random.choice(len(data), n_missing, replace=False, p=probs)
         elif missingness_type == "MNAR":
             # Missing not at random - systematic pattern
             # Missing more likely at the end of the series
             weights = np.linspace(0.1, 1.0, len(data))
             probs = weights / weights.sum()
-            missing_indices = np.random.choice(data.index, n_missing, replace=False, p=probs)
+            missing_indices = np.random.choice(len(data), n_missing, replace=False, p=probs)
         else:
             raise ValueError(f"Unknown missingness type: {missingness_type}")
             
@@ -287,17 +354,24 @@ class IterativeExperiment:
             inpainter = INPAINTERS[inp_name]
             inpainted_img = inpainter(img, mask, enc_name)
             
-            # Inverse transform
+            # Inverse transform - pass original length for proper reconstruction
             inverter = INVERTERS[enc_name]
-            recon_series = inverter(inpainted_img)
+            original_length = len(damaged_data)
+            recon_series = inverter(inpainted_img, original_length)
             
-            # Align length and merge with original
-            recon_series.index = damaged_data.index[:len(recon_series)]
+            # Ensure recon_series has the same length as original data
+            if len(recon_series) != original_length:
+                print(f"      ⚠️ Warning: Reconstructed series length ({len(recon_series)}) != original length ({original_length})")
+                # Interpolate to match original length
+                from scipy.interpolate import interp1d
+                x_old = np.linspace(0, 1, len(recon_series))
+                x_new = np.linspace(0, 1, original_length)
+                f = interp1d(x_old, recon_series.values, kind='linear', bounds_error=False, fill_value='extrapolate')
+                recon_series = pd.Series(f(x_new), index=damaged_data.index)
+            
+            # Merge with original data
             merged = damaged_data.copy()
-            
-            # Only replace missing values
-            mask_aligned = mask[:len(recon_series)]
-            merged[mask_aligned] = recon_series[mask_aligned]
+            merged[mask] = recon_series[mask]
             
             end_time = time.time()
             inpainting_time = end_time - start_time
@@ -366,20 +440,193 @@ class IterativeExperiment:
             print(f"Warning: Metric calculation failed: {e}")
             return {'MAE': np.inf, 'RMSE': np.inf, 'MAPE': np.inf}
     
-    def run_single_iteration(self, iteration: int) -> Dict[str, Any]:
-        """Run a single iteration of the experiment"""
-        iteration_start_time = time.time()
-        print(f"\n--- Running Iteration {iteration + 1}/{self.n_iterations} ---")
+    def generate_and_save_degraded_datasets(self):
+        """Generate and save all degraded datasets for all iterations"""
+        print("\n🔧 PHASE 1: Generating and saving degraded datasets...")
+        total_files = len(self.train_data) * len(self.missingness_types) * len(self.missingness_rates) * self.n_iterations
+        print(f"Will generate {len(self.train_data)} datasets × {len(self.missingness_types)} missingness types × {len(self.missingness_rates)} rates × {self.n_iterations} iterations = {total_files} total files")
         
-        iteration_results = {
-            'iteration': iteration,
+        for iteration in range(self.n_iterations):
+            print(f"\n🔄 Creating degraded datasets for iteration {iteration + 1}/{self.n_iterations}...")
+            
+            for dataset_idx in range(len(self.train_data)):
+                dataset_name = ["boiler", "pump", "vibr"][dataset_idx]
+                print(f"  Processing dataset {dataset_idx + 1} ({dataset_name})...")
+                
+                # Get original DataFrame with timestamps (only training part)
+                original_df = self.original_dataframes[dataset_idx].copy()
+                train_df = original_df.iloc[:-self.test_size].copy()  # Only training data
+                
+                for missingness_type in self.missingness_types:
+                    print(f"    Applying {missingness_type} missingness...")
+                    
+                    for rate in self.missingness_rates:
+                        rate_percent = int(rate * 100)  # Convert to percentage for filename
+                        print(f"      With {rate_percent}% missing data...")
+                        
+                        # Generate missingness for this dataset at this rate (each iteration gets different random pattern)
+                        # Set different seed for each iteration to ensure different missing patterns
+                        np.random.seed(42 + iteration * 1000 + dataset_idx * 100 + len(missingness_type) * 10 + rate_percent)
+                        damaged_series = self.generate_missingness(self.train_data[dataset_idx], missingness_type, rate)
+                        
+                        # Create new DataFrame with original timestamps but degraded values
+                        degraded_df = train_df.copy()
+                        degraded_df.iloc[:, 0] = damaged_series.values  # Replace values but keep timestamps
+                        
+                        # Save the degraded dataset with iteration number (keep index for timestamps)
+                        output_filename = f"{dataset_name}_{missingness_type}_{rate_percent}p_{iteration + 1}.csv"
+                        output_path = f"data/1_missing_data/{output_filename}"
+                        degraded_df.to_csv(output_path)  # Keep index=True to save timestamps
+                        print(f"        Saved: {output_path}")
+        
+        # Reset seed for reproducibility in other parts
+        np.random.seed(42)
+        print("✅ All degraded datasets have been generated and saved!")
+    
+    def repair_and_save_datasets(self):
+        """Phase 2: Load degraded datasets, apply all repair methods, and save to 2_fixed_data"""
+        print("\n🔧 PHASE 2: Repairing degraded datasets and saving to 2_fixed_data...")
+        
+        all_repair_methods = self.inpainting_models + self.non_inpainting_methods
+        total_repairs = len(self.train_data) * len(self.missingness_types) * len(self.missingness_rates) * self.n_iterations * len(all_repair_methods)
+        print(f"Will repair {len(self.train_data)} datasets × {len(self.missingness_types)} missingness types × {len(self.missingness_rates)} rates × {self.n_iterations} iterations × {len(all_repair_methods)} repair methods = {total_repairs} files")
+        
+        for iteration in range(self.n_iterations):
+            print(f"\n🔄 Repairing datasets for iteration {iteration + 1}/{self.n_iterations}...")
+            
+            for dataset_idx in range(len(self.train_data)):
+                dataset_name = ["boiler", "pump", "vibr"][dataset_idx]
+                print(f"  Processing dataset {dataset_idx + 1} ({dataset_name})...")
+                
+                for missingness_type in self.missingness_types:
+                    for rate in self.missingness_rates:
+                        rate_percent = int(rate * 100)
+                        print(f"    Loading {missingness_type} {rate_percent}% degraded data...")
+                        
+                        # Load degraded dataset from 1_missing_data
+                        degraded_file = f"data/1_missing_data/{dataset_name}_{missingness_type}_{rate_percent}p_{iteration + 1}.csv"
+                        
+                        try:
+                            # Load with timestamps
+                            df = pd.read_csv(degraded_file, index_col=0)
+                            damaged_series = df.iloc[:, 0].reset_index(drop=True)  # Convert to numeric Series
+                            
+                            # Apply all repair methods
+                            for repair_method in all_repair_methods:
+                                print(f"      Applying repair method: {repair_method}")
+                                
+                                # Apply repair
+                                if repair_method in self.inpainting_models:
+                                    repaired_series, _ = self.apply_inpainting_repair(damaged_series, repair_method)
+                                else:
+                                    repaired_series = self.apply_non_inpainting_repair(damaged_series, repair_method)
+                                
+                                # Create output DataFrame with original timestamps
+                                repaired_df = df.copy()
+                                repaired_df.iloc[:, 0] = repaired_series.values
+                                
+                                # Generate clean filename
+                                clean_method = self.clean_method_name(repair_method)
+                                output_filename = f"{dataset_name}_{missingness_type}_{rate_percent}p_{iteration + 1}_{clean_method}.csv"
+                                output_path = f"data/2_fixed_data/{output_filename}"
+                                
+                                # Save repaired dataset
+                                repaired_df.to_csv(output_path)
+                                print(f"        Saved: {output_path}")
+                                
+                        except Exception as e:
+                            print(f"        ❌ Error processing {degraded_file}: {e}")
+        
+        print("✅ All degraded datasets have been repaired and saved!")
+    
+
+    
+    def parse_filename(self, filename: str) -> dict:
+        """Parse filename to extract metadata"""
+        # Remove .csv extension
+        base_name = filename.replace('.csv', '')
+        
+        # Split by underscore
+        parts = base_name.split('_')
+        
+        if len(parts) < 5:
+            raise ValueError(f"Invalid filename format: {filename}")
+        
+        # Parse: dataset_missingness_ratep_iteration_method
+        dataset_name = parts[0]
+        missingness_type = parts[1] 
+        rate_with_p = parts[2]  # e.g., "2p"
+        iteration_nr = int(parts[3])
+        fixing_method_clean = "_".join(parts[4:])  # Handle multi-part method names
+        
+        # Extract rate from "2p" format
+        missing_rate = int(rate_with_p.replace('p', ''))
+        
+        return {
+            'dataset': dataset_name,
+            'missing_data_type': missingness_type,
+            'missing_rate': missing_rate,
+            'iteration_nr': iteration_nr,
+            'fixing_method_clean': fixing_method_clean,
+            'fixing_method_original': self.reverse_clean_method_name(fixing_method_clean)
+        }
+    
+    def reverse_clean_method_name(self, clean_name: str) -> str:
+        """Try to reverse the cleaning process to get original method name"""
+        # This is approximate since we lost the original dashes/underscores
+        # We'll keep the clean name but try to identify known patterns
+        
+        # Known mappings from clean to original
+        mappings = {
+            'gafunet': 'gaf-unet',
+            'mtfunet': 'mtf-unet', 
+            'rpunet': 'rp-unet',
+            'specunet': 'spec-unet',
+            'imputemean': 'impute_mean',
+            'imputemedian': 'impute_median',
+            'imputemode': 'impute_mode',
+            'imputeffill': 'impute_ffill',
+            'imputebfill': 'impute_bfill',
+            'interpolatenearest': 'interpolate_nearest',
+            'interpolatelinear': 'interpolate_linear',
+            'interpolateindex': 'interpolate_index',
+            'interpolatequadratic': 'interpolate_quadratic',
+            'interpolatecubic': 'interpolate_cubic',
+            'interpolatepolynomial': 'interpolate_polynomial',
+            'interpolatepchip': 'interpolate_pchip',
+            'interpolateakima': 'interpolate_akima'
+        }
+        
+        return mappings.get(clean_name, clean_name)
+    
+    def load_repaired_dataset_by_path(self, file_path: str) -> pd.Series:
+        """Load a repaired dataset by full file path"""
+        try:
+            # Load the same way as other data - with timestamps as index
+            df = pd.read_csv(file_path, index_col=0)
+            series_data = df.iloc[:, 0]  # First column is the time series values
+            
+            # Reset index to numeric for forecasting
+            series_data = series_data.reset_index(drop=True)
+            
+            return series_data
+        except FileNotFoundError:
+            raise FileNotFoundError(f"Repaired dataset not found: {file_path}")
+        except Exception as e:
+            raise Exception(f"Error loading repaired dataset {file_path}: {e}")
+    
+    def run_forecasting_phase(self) -> Dict[str, Any]:
+        """Phase 3: Load all repaired datasets and perform forecasting"""
+        forecasting_start_time = time.time()
+        print(f"\n🔬 PHASE 3: Running forecasting on all repaired datasets...")
+        
+        results = {
+            'results_dataframe': [],  # List to store results for df_final
             'metrics': {},
             'predictions': {},
             'timing': {
-                'iteration_start_time': datetime.now().isoformat(),
-                'iteration_duration': None,
-                'inpainting_times': {},
-                'total_inpainting_time_iteration': 0.0
+                'forecasting_start_time': datetime.now().isoformat(),
+                'forecasting_duration': None
             },
             'system_state': {
                 'cpu_percent_start': psutil.cpu_percent(),
@@ -389,65 +636,99 @@ class IterativeExperiment:
             }
         }
         
-        for missingness_type in self.missingness_types:
-            print(f"Processing {missingness_type} missingness...")
+        # List all files in 2_fixed_data
+        fixed_data_dir = "data/2_fixed_data"
+        
+        if not os.path.exists(fixed_data_dir):
+            raise FileNotFoundError(f"Fixed data directory not found: {fixed_data_dir}")
+        
+        csv_files = [f for f in os.listdir(fixed_data_dir) if f.endswith('.csv')]
+        total_forecasting_tasks = len(csv_files) * len(self.forecasting_models)
+        
+        print(f"Found {len(csv_files)} repaired datasets")
+        print(f"Will perform {total_forecasting_tasks} forecasting tasks ({len(csv_files)} datasets × {len(self.forecasting_models)} models)")
+        
+        processed_count = 0
+        
+        for csv_file in sorted(csv_files):
+            print(f"\n📁 Processing file: {csv_file}")
             
-            # Generate missingness
-            damaged_train = self.generate_missingness(self.train_data, missingness_type)
-            
-            # Test all repair methods
-            all_repair_methods = self.inpainting_models + self.non_inpainting_methods
-            
-            for repair_method in all_repair_methods:
-                print(f"  Applying repair method: {repair_method}")
+            try:
+                # Parse filename to get metadata
+                metadata = self.parse_filename(csv_file)
+                print(f"  Parsed: {metadata['dataset']}, {metadata['missing_data_type']}, {metadata['missing_rate']}%, iter {metadata['iteration_nr']}, {metadata['fixing_method_original']}")
                 
-                # Apply repair with timing
-                if repair_method in self.inpainting_models:
-                    repaired_train, inpainting_time = self.apply_inpainting_repair(damaged_train, repair_method)
-                    # Store inpainting time
-                    key_timing = f"{missingness_type}_{repair_method}"
-                    iteration_results['timing']['inpainting_times'][key_timing] = inpainting_time
-                    iteration_results['timing']['total_inpainting_time_iteration'] += inpainting_time
-                    self.timing_data['total_inpainting_time'] += inpainting_time
-                else:
-                    repaired_train = self.apply_non_inpainting_repair(damaged_train, repair_method)
+                # Load the repaired dataset
+                file_path = os.path.join(fixed_data_dir, csv_file)
+                repaired_data = self.load_repaired_dataset_by_path(file_path)
                 
-                # Test all forecasting models
+                # Get test data for this dataset
+                dataset_names = ["boiler", "pump", "vibr"]
+                try:
+                    dataset_idx = dataset_names.index(metadata['dataset'])
+                    test_data = self.test_data[dataset_idx]
+                except ValueError:
+                    print(f"    ❌ Unknown dataset: {metadata['dataset']}")
+                    continue
+                
+                # Run all forecasting models
                 for forecast_model in self.forecasting_models:
-                    print(f"    Forecasting with: {forecast_model}")
+                    print(f"    🔮 Forecasting with: {forecast_model}")
                     
-                    # Make predictions
-                    predictions = self.forecast_next_points(repaired_train, forecast_model)
-                    
-                    # Calculate metrics
-                    metrics = self.calculate_metrics(self.test_data.values, predictions)
-                    
-                    # Store results
-                    key = f"{missingness_type}_{repair_method}_{forecast_model}"
-                    iteration_results['metrics'][key] = metrics
-                    iteration_results['predictions'][key] = predictions.tolist()
+                    try:
+                        # Make predictions
+                        predictions = self.forecast_next_points(repaired_data, forecast_model)
+                        
+                        # Calculate metrics
+                        metrics = self.calculate_metrics(test_data.values, predictions)
+                        
+                        # Create unique key
+                        key = f"{metadata['dataset']}_{metadata['missing_data_type']}_{metadata['missing_rate']}p_{metadata['iteration_nr']}_{metadata['fixing_method_clean']}_{forecast_model}"
+                        
+                        # Store results
+                        results['metrics'][key] = metrics
+                        results['predictions'][key] = predictions.tolist()
+                        
+                        # Add to results dataframe
+                        result_row = {
+                            'dataset': metadata['dataset'],
+                            'missing_data_type': metadata['missing_data_type'],
+                            'missing_rate': metadata['missing_rate'],
+                            'iteration_nr': metadata['iteration_nr'],
+                            'fixing_method': metadata['fixing_method_original'],
+                            'prediction_method': forecast_model,
+                            'MAPE': metrics['MAPE'],
+                            'MAE': metrics['MAE'],
+                            'RMSE': metrics['RMSE']
+                        }
+                        results['results_dataframe'].append(result_row)
+                        
+                        processed_count += 1
+                        progress = (processed_count / total_forecasting_tasks) * 100
+                        print(f"      ✓ Completed ({progress:.1f}% overall progress)")
+                        
+                    except Exception as e:
+                        print(f"      ❌ Forecasting failed with {forecast_model}: {e}")
+                        
+            except Exception as e:
+                print(f"    ❌ Error processing {csv_file}: {e}")
+                continue
         
         # Record end timing and system state
-        iteration_end_time = time.time()
-        iteration_duration = iteration_end_time - iteration_start_time
+        forecasting_end_time = time.time()
+        forecasting_duration = forecasting_end_time - forecasting_start_time
         
-        iteration_results['timing']['iteration_end_time'] = datetime.now().isoformat()
-        iteration_results['timing']['iteration_duration'] = iteration_duration
-        iteration_results['system_state']['cpu_percent_end'] = psutil.cpu_percent()
-        iteration_results['system_state']['memory_percent_end'] = psutil.virtual_memory().percent
+        results['timing']['forecasting_end_time'] = datetime.now().isoformat()
+        results['timing']['forecasting_duration'] = forecasting_duration
+        results['system_state']['cpu_percent_end'] = psutil.cpu_percent()
+        results['system_state']['memory_percent_end'] = psutil.virtual_memory().percent
         
-        # Store in main timing data
-        self.timing_data['iterations'][f'iteration_{iteration + 1}'] = {
-            'duration': iteration_duration,
-            'inpainting_time': iteration_results['timing']['total_inpainting_time_iteration'],
-            'start_time': iteration_results['timing']['iteration_start_time'],
-            'end_time': iteration_results['timing']['iteration_end_time']
-        }
+        print(f"\n✅ Forecasting phase completed!")
+        print(f"   - Total time: {forecasting_duration:.2f} seconds")
+        print(f"   - Processed: {processed_count}/{total_forecasting_tasks} forecasting tasks")
+        print(f"   - Results: {len(results['results_dataframe'])} rows in final dataframe")
         
-        print(f"✓ Iteration {iteration + 1} completed in {iteration_duration:.2f} seconds")
-        print(f"  - Inpainting time: {iteration_results['timing']['total_inpainting_time_iteration']:.2f} seconds")
-        
-        return iteration_results
+        return results
     
     def run_experiment(self) -> Dict[str, Any]:
         """Run the complete iterative experiment"""
@@ -465,6 +746,12 @@ class IterativeExperiment:
         print(f"  - Forecasting models: {self.forecasting_models}")
         print(f"  - Test size: {self.test_size}")
         
+        # PHASE 1: Generate and save all degraded datasets for all iterations
+        self.generate_and_save_degraded_datasets()
+        
+        # PHASE 2: Repair all degraded datasets and save to 2_fixed_data
+        self.repair_and_save_datasets()
+        
         # Collect initial system state
         initial_system_state = {
             'cpu_percent': psutil.cpu_percent(interval=1),
@@ -473,20 +760,12 @@ class IterativeExperiment:
             'processes_count': len(psutil.pids())
         }
         
-        all_results = []
+        # PHASE 3: Run forecasting on all repaired datasets
+        forecasting_results = self.run_forecasting_phase()
         
-        # Run iterations
-        for i in range(self.n_iterations):
-            iteration_result = self.run_single_iteration(i)
-            all_results.append(iteration_result)
-            
-            # Save intermediate results
-            with open(f"{self.output_dir}/iteration_{i+1}_results.json", 'w') as f:
-                json.dump(iteration_result, f, indent=2)
-            
-            # Show progress
-            progress = ((i + 1) / self.n_iterations) * 100
-            print(f"📊 Progress: {progress:.1f}% ({i + 1}/{self.n_iterations} iterations)")
+        # Save forecasting results
+        with open(f"{self.output_dir}/forecasting_results.json", 'w') as f:
+            json.dump(forecasting_results, f, indent=2)
         
         # End experiment timing
         experiment_end_time = time.time()
@@ -501,13 +780,23 @@ class IterativeExperiment:
             'processes_count': len(psutil.pids())
         }
         
+        # Create final dataframe
+        df_final = self.create_final_dataframe(forecasting_results)
+        
+        # Save final dataframe to CSV
+        df_final_path = f"{self.output_dir}/df_final.csv"
+        df_final.to_csv(df_final_path, index=False)
+        print(f"✅ Final dataframe saved to: {df_final_path}")
+        
         # Aggregate results
-        aggregated_results = self.aggregate_results(all_results)
+        aggregated_results = self.aggregate_results(forecasting_results)
         
         # Add comprehensive timing and system information
         comprehensive_results = {
             **aggregated_results,
+            'df_final': df_final.to_dict('records'),  # Include dataframe data
             'timing_summary': self.timing_data,
+            'forecasting_timing': forecasting_results.get('timing', {}),
             'system_information': self.system_info,
             'system_state_changes': {
                 'initial': initial_system_state,
@@ -517,9 +806,11 @@ class IterativeExperiment:
             },
             'experiment_metadata': {
                 'total_methods_tested': len(self.inpainting_models) + len(self.non_inpainting_methods),
-                'total_combinations': len(self.missingness_types) * (len(self.inpainting_models) + len(self.non_inpainting_methods)) * len(self.forecasting_models),
-                'total_experiments_run': self.n_iterations * len(self.missingness_types) * (len(self.inpainting_models) + len(self.non_inpainting_methods)) * len(self.forecasting_models),
-                'inpainting_percentage_of_total_time': (self.timing_data['total_inpainting_time'] / self.timing_data['experiment_duration']) * 100 if self.timing_data['experiment_duration'] > 0 else 0
+                'total_combinations': len(self.missingness_types) * len(self.missingness_rates) * (len(self.inpainting_models) + len(self.non_inpainting_methods)) * len(self.forecasting_models),
+                'total_experiments_run': self.n_iterations * len(self.missingness_types) * len(self.missingness_rates) * (len(self.inpainting_models) + len(self.non_inpainting_methods)) * len(self.forecasting_models),
+                'total_repaired_files': len(os.listdir("data/2_fixed_data")) if os.path.exists("data/2_fixed_data") else 0,
+                'total_forecasting_tasks': len(forecasting_results.get('results_dataframe', [])),
+                'forecasting_duration': forecasting_results.get('timing', {}).get('forecasting_duration', 0)
             }
         }
         
@@ -533,7 +824,27 @@ class IterativeExperiment:
         # Print summary
         self._print_timing_summary()
         
+        # Print experiment summary
+        self._print_experiment_summary(df_final)
+        
         return comprehensive_results
+    
+    def get_final_dataframe(self) -> pd.DataFrame:
+        """Get the final results dataframe after running the experiment"""
+        try:
+            df_final_path = f"{self.output_dir}/df_final.csv"
+            if os.path.exists(df_final_path):
+                df_final = pd.read_csv(df_final_path)
+                print(f"✅ Loaded final dataframe from: {df_final_path}")
+                print(f"📊 Shape: {df_final.shape}")
+                return df_final
+            else:
+                print(f"❌ Final dataframe not found at: {df_final_path}")
+                print("Please run the experiment first using run_experiment()")
+                return pd.DataFrame()
+        except Exception as e:
+            print(f"❌ Error loading final dataframe: {e}")
+            return pd.DataFrame()
     
     def _save_timing_report(self):
         """Save a detailed timing report"""
@@ -574,10 +885,6 @@ class IterativeExperiment:
         print("⏱️  TIMING SUMMARY")
         print("="*60)
         print(f"🔬 Experiment Duration: {self._format_duration(self.timing_data['experiment_duration'])}")
-        print(f"🎨 Total Inpainting Time: {self._format_duration(self.timing_data['total_inpainting_time'])}")
-        print(f"📊 Inpainting Percentage: {(self.timing_data['total_inpainting_time'] / self.timing_data['experiment_duration']) * 100:.1f}%")
-        print(f"🔄 Average per Iteration: {self._format_duration(self.timing_data['experiment_duration'] / self.n_iterations)}")
-        print(f"🎨 Average Inpainting per Iteration: {self._format_duration(self.timing_data['total_inpainting_time'] / self.n_iterations)}")
         
         print(f"\n💻 SYSTEM INFORMATION:")
         print(f"CPU: {self.system_info['platform']['processor']}")
@@ -585,35 +892,110 @@ class IterativeExperiment:
         print(f"Memory: {self.system_info['hardware']['memory_total_gb']} GB total")
         print(f"Platform: {self.system_info['platform']['system']} {self.system_info['platform']['release']}")
         
-        print(f"\n📈 PERFORMANCE BREAKDOWN:")
-        for iteration_name, iteration_data in self.timing_data['iterations'].items():
-            inpainting_pct = (iteration_data['inpainting_time'] / iteration_data['duration']) * 100 if iteration_data['duration'] > 0 else 0
-            print(f"  {iteration_name}: {self._format_duration(iteration_data['duration'])} (inpainting: {inpainting_pct:.1f}%)")
+        print("="*60)
+    
+    def _print_experiment_summary(self, df_final: pd.DataFrame):
+        """Print a comprehensive experiment summary"""
+        print("\n" + "="*60)
+        print("🔬 EXPERIMENT SUMMARY")
+        print("="*60)
+        
+        print(f"📊 Total Results: {len(df_final)} combinations tested")
+        if not df_final.empty:
+            print(f"🔄 Iterations: {df_final['iteration_nr'].nunique()} ({', '.join(map(str, sorted(df_final['iteration_nr'].unique())))})")
+            print(f"📁 Datasets: {df_final['dataset'].nunique()} ({', '.join(df_final['dataset'].unique())})")
+            print(f"🎯 Missingness Types: {df_final['missing_data_type'].nunique()} ({', '.join(df_final['missing_data_type'].unique())})")
+            print(f"📉 Missing Rates: {df_final['missing_rate'].nunique()} ({', '.join(map(str, sorted(df_final['missing_rate'].unique())))}%)")
+            print(f"🔧 Fixing Methods: {df_final['fixing_method'].nunique()} ({', '.join(df_final['fixing_method'].unique())})")
+            print(f"📈 Prediction Methods: {df_final['prediction_method'].nunique()} ({', '.join(df_final['prediction_method'].unique())})")
+            
+            print(f"\n📋 Results Breakdown:")
+            print(f"  - Datasets × Missingness Types × Missing Rates × Iterations × Fixing Methods × Prediction Methods")
+            print(f"  - {df_final['dataset'].nunique()} × {df_final['missing_data_type'].nunique()} × {df_final['missing_rate'].nunique()} × {df_final['iteration_nr'].nunique()} × {df_final['fixing_method'].nunique()} × {df_final['prediction_method'].nunique()}")
+            expected = df_final['dataset'].nunique() * df_final['missing_data_type'].nunique() * df_final['missing_rate'].nunique() * df_final['iteration_nr'].nunique() * df_final['fixing_method'].nunique() * df_final['prediction_method'].nunique()
+            print(f"  - Expected: {expected}")
+            print(f"  - Actual: {len(df_final)}")
+        else:
+            print("⚠️ No results in final dataframe")
+        
+        print(f"\n🎯 Best Performance by Metric:")
+        for metric in ['MAPE', 'MAE', 'RMSE']:
+            best_idx = df_final[metric].idxmin()
+            best_row = df_final.loc[best_idx]
+            print(f"  {metric}: {best_row[metric]:.4f} (Dataset: {best_row['dataset']}, Missing: {best_row['missing_data_type']}, Fix: {best_row['fixing_method']}, Predict: {best_row['prediction_method']})")
+        
+        print(f"\n📁 Results saved to:")
+        print(f"  - CSV: {self.output_dir}/df_final.csv")
+        print(f"  - JSON: {self.output_dir}/final_results.json")
+        print(f"  - Timing: {self.output_dir}/timing_report.json")
         
         print("="*60)
     
-    def aggregate_results(self, all_results: List[Dict]) -> Dict[str, Any]:
-        """Aggregate results across all iterations"""
-        print("\nAggregating results across iterations...")
+    def create_final_dataframe(self, forecasting_results: Dict) -> pd.DataFrame:
+        """Create the final results dataframe from forecasting results"""
+        print("\nCreating final results dataframe...")
         
-        # Collect all metrics
-        all_metrics = {}
-        for result in all_results:
-            for key, metrics in result['metrics'].items():
-                if key not in all_metrics:
-                    all_metrics[key] = {metric: [] for metric in metrics.keys()}
-                
-                for metric, value in metrics.items():
-                    all_metrics[key][metric].append(value)
+        # Get results directly from forecasting_results
+        if 'results_dataframe' in forecasting_results:
+            all_rows = forecasting_results['results_dataframe']
+        else:
+            print("⚠️ No results_dataframe found in forecasting results")
+            all_rows = []
+        
+        # Create DataFrame
+        df_final = pd.DataFrame(all_rows)
+        
+        # Ensure all required columns are present
+        required_columns = ['dataset', 'missing_data_type', 'missing_rate', 'iteration_nr', 'fixing_method', 'prediction_method', 'MAPE', 'MAE', 'RMSE']
+        for col in required_columns:
+            if col not in df_final.columns:
+                print(f"⚠️ Warning: Column '{col}' not found in results")
+                df_final[col] = None
+        
+        # Sort by dataset, missing_data_type, missing_rate, iteration_nr, fixing_method, prediction_method
+        df_final = df_final.sort_values(['dataset', 'missing_data_type', 'missing_rate', 'iteration_nr', 'fixing_method', 'prediction_method'])
+        
+        # Reset index
+        df_final = df_final.reset_index(drop=True)
+        
+        print(f"✅ Final dataframe created with {len(df_final)} rows")
+        print(f"📊 Shape: {df_final.shape}")
+        print(f"🔍 Columns: {list(df_final.columns)}")
+        
+        # Show sample of results
+        print("\n📋 Sample of final results:")
+        print(df_final.head(10))
+        
+        return df_final
+    
+    def aggregate_results(self, forecasting_results: Dict) -> Dict[str, Any]:
+        """Aggregate results from forecasting phase"""
+        print("\nAggregating forecasting results...")
+        
+        # Get metrics from forecasting results
+        if 'metrics' in forecasting_results:
+            all_metrics = forecasting_results['metrics']
+        else:
+            print("⚠️ No metrics found in forecasting results")
+            all_metrics = {}
+        
+        # Convert single values to lists for consistency with old format
+        formatted_metrics = {}
+        for key, metrics in all_metrics.items():
+            if key not in formatted_metrics:
+                formatted_metrics[key] = {metric: [] for metric in metrics.keys()}
+            
+            for metric, value in metrics.items():
+                formatted_metrics[key][metric].append(value)
         
         # Calculate means and standard deviations
         aggregated = {
             'mean_metrics': {},
             'std_metrics': {},
-            'raw_metrics': all_metrics
+            'raw_metrics': formatted_metrics
         }
         
-        for key, metrics in all_metrics.items():
+        for key, metrics in formatted_metrics.items():
             aggregated['mean_metrics'][key] = {}
             aggregated['std_metrics'][key] = {}
             
@@ -642,19 +1024,22 @@ class IterativeExperiment:
             for key, metrics in mean_metrics.items():
                 if metric in metrics and not np.isinf(metrics[metric]) and not np.isnan(metrics[metric]):
                     parts = key.split('_')
-                    if len(parts) >= 3:  # Ensure we have all parts
-                        missingness_type = parts[0]
+                    if len(parts) >= 4:  # Now we have dataset_idx, missingness_type, rate, repair_method(s), forecast_model
+                        dataset_idx = parts[0]
+                        missingness_type = parts[1]
+                        missing_rate = parts[2]  # e.g., "2p", "5p", "10p"
                         # Handle multi-part repair method names (e.g., "interpolate_linear")
-                        if len(parts) > 3:
-                            repair_method = '_'.join(parts[1:-1])
+                        if len(parts) > 4:
+                            repair_method = '_'.join(parts[3:-1])
                             forecast_model = parts[-1]
                         else:
-                            repair_method = parts[1]
-                            forecast_model = parts[2]
+                            repair_method = parts[3] if len(parts) > 3 else "unknown"
+                            forecast_model = parts[4] if len(parts) > 4 else "unknown"
                         
                         plot_data.append({
-                            'Method': repair_method,
+                            'Method': f"{repair_method}_{missing_rate}",
                             'Missingness': missingness_type,
+                            'MissingRate': missing_rate,
                             'Repair': repair_method,
                             'Model': forecast_model,
                             'Value': metrics[metric],
@@ -732,47 +1117,50 @@ class IterativeExperiment:
         
         for metric in ['MAE', 'RMSE', 'MAPE']:
             for missingness_type in self.missingness_types:
-                for forecast_model in self.forecasting_models:
+                for rate in self.missingness_rates:
+                    rate_percent = int(rate * 100)
+                    for forecast_model in self.forecasting_models:
+                        
+                        # Collect inpainting results
+                        inpainting_results = {}
+                        for inpainting_method in self.inpainting_models:
+                            key = f"dataset_0_{missingness_type}_{rate_percent}p_{inpainting_method}_{forecast_model}"
+                            if key in raw_metrics and metric in raw_metrics[key]:
+                                values = [v for v in raw_metrics[key][metric] 
+                                        if not np.isinf(v) and not np.isnan(v)]
+                                if len(values) >= 2:  # Need at least 2 values for t-test
+                                    inpainting_results[inpainting_method] = values
+                        
+                        # Collect non-inpainting results
+                        non_inpainting_results = {}
+                        for non_inpainting_method in self.non_inpainting_methods:
+                            key = f"dataset_0_{missingness_type}_{rate_percent}p_{non_inpainting_method}_{forecast_model}"
+                            if key in raw_metrics and metric in raw_metrics[key]:
+                                values = [v for v in raw_metrics[key][metric] 
+                                        if not np.isinf(v) and not np.isnan(v)]
+                                if len(values) >= 2:
+                                    non_inpainting_results[non_inpainting_method] = values
                     
-                    # Collect inpainting results
-                    inpainting_results = {}
-                    for inpainting_method in self.inpainting_models:
-                        key = f"{missingness_type}_{inpainting_method}_{forecast_model}"
-                        if key in raw_metrics and metric in raw_metrics[key]:
-                            values = [v for v in raw_metrics[key][metric] 
-                                    if not np.isinf(v) and not np.isnan(v)]
-                            if len(values) >= 2:  # Need at least 2 values for t-test
-                                inpainting_results[inpainting_method] = values
-                    
-                    # Collect non-inpainting results
-                    non_inpainting_results = {}
-                    for non_inpainting_method in self.non_inpainting_methods:
-                        key = f"{missingness_type}_{non_inpainting_method}_{forecast_model}"
-                        if key in raw_metrics and metric in raw_metrics[key]:
-                            values = [v for v in raw_metrics[key][metric] 
-                                    if not np.isinf(v) and not np.isnan(v)]
-                            if len(values) >= 2:
-                                non_inpainting_results[non_inpainting_method] = values
-                    
-                    # Perform t-tests: each inpainting vs each non-inpainting
-                    for inp_method, inp_values in inpainting_results.items():
-                        for non_inp_method, non_inp_values in non_inpainting_results.items():
-                            try:
-                                t_stat, p_value = ttest_ind(inp_values, non_inp_values)
-                                
-                                test_results.append({
-                                    'metric': metric,
-                                    'missingness_type': missingness_type,
-                                    'forecast_model': forecast_model,
-                                    'inpainting_method': inp_method,
-                                    'non_inpainting_method': non_inp_method,
-                                    't_statistic': t_stat,
-                                    'p_value': p_value,
-                                    'inpainting_mean': np.mean(inp_values),
-                                    'non_inpainting_mean': np.mean(non_inp_values)
-                                })
-                            except Exception as e:
-                                print(f"t-test failed for {inp_method} vs {non_inp_method}: {e}")
+                        # Perform t-tests: each inpainting vs each non-inpainting
+                        for inp_method, inp_values in inpainting_results.items():
+                            for non_inp_method, non_inp_values in non_inpainting_results.items():
+                                try:
+                                    t_stat, p_value = ttest_ind(inp_values, non_inp_values)
+                                    
+                                    test_results.append({
+                                        'metric': metric,
+                                        'missingness_type': missingness_type,
+                                        'missing_rate': rate_percent,
+                                        'forecast_model': forecast_model,
+                                        'inpainting_method': inp_method,
+                                        'non_inpainting_method': non_inp_method,
+                                        't_statistic': t_stat,
+                                        'p_value': p_value,
+                                        'inpainting_mean': np.mean(inp_values),
+                                        'non_inpainting_mean': np.mean(non_inp_values)
+                                    })
+                                except Exception as e:
+                                    print(f"t-test failed for {inp_method} vs {non_inp_method}: {e}")
         
         # Save test results
         if test_results:
@@ -1069,36 +1457,38 @@ class IterativeExperiment:
             long_form_data = []
             
             for missingness_type in self.missingness_types:
-                for forecast_model in self.forecasting_models:
-                    
-                    # Collect all methods and their iteration results
-                    all_methods_data = {}
-                    
-                    # Get inpainting methods
-                    for inpainting_method in self.inpainting_models:
-                        key = f"{missingness_type}_{inpainting_method}_{forecast_model}"
-                        if key in raw_metrics and metric in raw_metrics[key]:
-                            values = [v for v in raw_metrics[key][metric] 
-                                    if not np.isinf(v) and not np.isnan(v)]
-                            if values:
-                                method_name = f"{inpainting_method}_{forecast_model}"
-                                all_methods_data[method_name] = {
-                                    'values': values,
-                                    'group': 'inpainting'
-                                }
-                    
-                    # Get traditional methods
-                    for traditional_method in self.non_inpainting_methods:
-                        key = f"{missingness_type}_{traditional_method}_{forecast_model}"
-                        if key in raw_metrics and metric in raw_metrics[key]:
-                            values = [v for v in raw_metrics[key][metric] 
-                                    if not np.isinf(v) and not np.isnan(v)]
-                            if values:
-                                method_name = f"{traditional_method}_{forecast_model}"
-                                all_methods_data[method_name] = {
-                                    'values': values,
-                                    'group': 'traditional'
-                                }
+                for rate in self.missingness_rates:
+                    rate_percent = int(rate * 100)
+                    for forecast_model in self.forecasting_models:
+                        
+                        # Collect all methods and their iteration results
+                        all_methods_data = {}
+                        
+                        # Get inpainting methods
+                        for inpainting_method in self.inpainting_models:
+                            key = f"dataset_0_{missingness_type}_{rate_percent}p_{inpainting_method}_{forecast_model}"
+                            if key in raw_metrics and metric in raw_metrics[key]:
+                                values = [v for v in raw_metrics[key][metric] 
+                                        if not np.isinf(v) and not np.isnan(v)]
+                                if values:
+                                    method_name = f"{inpainting_method}_{forecast_model}_{rate_percent}p"
+                                    all_methods_data[method_name] = {
+                                        'values': values,
+                                        'group': 'inpainting'
+                                    }
+                        
+                        # Get traditional methods
+                        for traditional_method in self.non_inpainting_methods:
+                            key = f"dataset_0_{missingness_type}_{rate_percent}p_{traditional_method}_{forecast_model}"
+                            if key in raw_metrics and metric in raw_metrics[key]:
+                                values = [v for v in raw_metrics[key][metric] 
+                                        if not np.isinf(v) and not np.isnan(v)]
+                                if values:
+                                    method_name = f"{traditional_method}_{forecast_model}_{rate_percent}p"
+                                    all_methods_data[method_name] = {
+                                        'values': values,
+                                        'group': 'traditional'
+                                    }
                     
                     # Convert to long-form format
                     if all_methods_data:
@@ -1113,6 +1503,7 @@ class IterativeExperiment:
                                         'method': method_name,
                                         'group': method_data['group'],
                                         'missingness_type': missingness_type,
+                                        'missing_rate': rate_percent,
                                         'forecast_model': forecast_model,
                                         'metric_value': method_data['values'][iteration]
                                     })
@@ -1513,29 +1904,32 @@ class IterativeExperiment:
         
         for metric in ['MAE', 'RMSE', 'MAPE']:
             for forecast_model in self.forecasting_models:
-                subset = df_tests[(df_tests['metric'] == metric) & 
-                                (df_tests['forecast_model'] == forecast_model)]
-                
-                if subset.empty:
-                    continue
-                
-                fig, axes = plt.subplots(1, 3, figsize=(20, 6))
-                
-                # Get actual missingness types in the data
-                actual_miss_types = subset['missingness_type'].unique()
-                n_plots = len(actual_miss_types)
-                
-                if n_plots == 0:
-                    continue
+                for rate in self.missingness_rates:
+                    rate_percent = int(rate * 100)
+                    subset = df_tests[(df_tests['metric'] == metric) & 
+                                    (df_tests['forecast_model'] == forecast_model) &
+                                    (df_tests['missing_rate'] == rate_percent)]
                     
-                # Recreate subplot layout based on actual data
-                fig.clear()
-                fig, axes = plt.subplots(1, n_plots, figsize=(7*n_plots, 6))
-                if n_plots == 1:
-                    axes = [axes]
-                
-                for i, miss_type in enumerate(actual_miss_types):
-                    miss_subset = subset[subset['missingness_type'] == miss_type].copy()
+                    if subset.empty:
+                        continue
+                    
+                    fig, axes = plt.subplots(1, 3, figsize=(20, 6))
+                    
+                    # Get actual missingness types in the data
+                    actual_miss_types = subset['missingness_type'].unique()
+                    n_plots = len(actual_miss_types)
+                    
+                    if n_plots == 0:
+                        continue
+                        
+                    # Recreate subplot layout based on actual data
+                    fig.clear()
+                    fig, axes = plt.subplots(1, n_plots, figsize=(7*n_plots, 6))
+                    if n_plots == 1:
+                        axes = [axes]
+                    
+                    for i, miss_type in enumerate(actual_miss_types):
+                        miss_subset = subset[subset['missingness_type'] == miss_type].copy()
                     
                     if not miss_subset.empty:
                         # Create a unique identifier for each comparison
@@ -1574,11 +1968,11 @@ class IterativeExperiment:
                     else:
                         axes[i].set_title(f'{metric} - {miss_type} (No Data)')
                 
-                plt.suptitle(f'Statistical Test Results: {metric} - {forecast_model}')
-                plt.tight_layout()
-                plt.savefig(f"{self.output_dir}/plots/statistical_tests_{metric}_{forecast_model}.png", 
-                           dpi=300, bbox_inches='tight')
-                plt.close()
+                    plt.suptitle(f'Statistical Test Results: {metric} - {forecast_model} - {rate_percent}% Missing')
+                    plt.tight_layout()
+                    plt.savefig(f"{self.output_dir}/plots/statistical_tests_{metric}_{forecast_model}_{rate_percent}p.png", 
+                               dpi=300, bbox_inches='tight')
+                    plt.close()
 
 
 def main():
@@ -1589,8 +1983,8 @@ def main():
                        help="Number of iterations to run")
     parser.add_argument("--test_size", type=int, default=10, 
                        help="Size of test set (last N points)")
-    parser.add_argument("--missingness_rate", type=float, default=0.2, 
-                       help="Rate of missingness to introduce")
+    parser.add_argument("--missingness_rates", nargs='+', type=float, default=[0.02, 0.05, 0.10], 
+                       help="Rates of missingness to introduce")
     parser.add_argument("--inpainting_models", nargs='+', 
                        default=["gaf-unet"],
                        help="Inpainting models to use")
@@ -1613,7 +2007,7 @@ def main():
         inpainting_models=args.inpainting_models,
         forecasting_models=args.forecasting_models,
         missingness_types=args.missingness_types,
-        missingness_rate=args.missingness_rate,
+        missingness_rates=args.missingness_rates,
         output_dir=args.output_dir
     )
     

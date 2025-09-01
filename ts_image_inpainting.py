@@ -10,21 +10,67 @@ import matplotlib.pyplot as plt
 import torch
 from diffusers import StableDiffusionInpaintPipeline
 from PIL import Image
+import psutil
 
 # ---------------------------- ENCODERS -------------------------------------
 
-def to_gaf(series):
-    transformer = GramianAngularField(method="summation")
+def get_optimal_image_size(series_length):
+    """Calculate optimal image size based on available memory"""
+    try:
+        memory = psutil.virtual_memory()
+        available_gb = memory.available / (1024**3)
+        
+        # Estimate memory needed for image processing
+        # Each pixel needs ~4 bytes (float32) + overhead
+        if available_gb > 8:  # 8+ GB available
+            max_size = 1024
+        elif available_gb > 4:  # 4+ GB available
+            max_size = 512
+        elif available_gb > 2:  # 2+ GB available
+            max_size = 256
+        else:  # Less than 2 GB
+            max_size = 128
+            
+        # Don't exceed series length
+        optimal_size = min(max_size, series_length)
+        
+        # Ensure it's a reasonable size for the model
+        if optimal_size > 512:
+            optimal_size = 512
+        elif optimal_size < 64:
+            optimal_size = 64
+            
+        return optimal_size
+    except:
+        return 256  # Fallback size
+
+def to_gaf(series, max_size=None):
+    """Convert series to GAF with automatic memory optimization"""
+    if max_size is None:
+        max_size = get_optimal_image_size(len(series))
+    
+    print(f"  📊 GAF: Converting {len(series)} points to {max_size}x{max_size} image")
+    transformer = GramianAngularField(method="summation", image_size=max_size)
     X = transformer.fit_transform(series.values.reshape(1, -1))
     return X[0]
 
-def to_mtf(series):
-    transformer = MarkovTransitionField()
+def to_mtf(series, max_size=None):
+    """Convert series to MTF with automatic memory optimization"""
+    if max_size is None:
+        max_size = get_optimal_image_size(len(series))
+    
+    print(f"  📊 MTF: Converting {len(series)} points to {max_size}x{max_size} image")
+    transformer = MarkovTransitionField(image_size=max_size)
     X = transformer.fit_transform(series.values.reshape(1, -1))
     return X[0]
 
-def to_rp(series):
-    transformer = RecurrencePlot()
+def to_rp(series, max_size=None):
+    """Convert series to Recurrence Plot with automatic memory optimization"""
+    if max_size is None:
+        max_size = get_optimal_image_size(len(series))
+    
+    print(f"  📊 RP: Converting {len(series)} points to {max_size}x{max_size} image")
+    transformer = RecurrencePlot(image_size=max_size)
     X = transformer.fit_transform(series.values.reshape(1, -1))
     return X[0]
 
@@ -61,35 +107,101 @@ class UnetInpainter:
     Specifically, it uses the Stable Diffusion v1.5 inpainting pipeline,
     which has a U-Net backbone. It will be downloaded on the first run.
     """
-    def __init__(self, device="cuda" if torch.cuda.is_available() else "cpu"):
+    def __init__(self, device=None):
+        # Check CUDA availability and set device
+        if device is None:
+            if torch.cuda.is_available():
+                device = "cuda"
+                print(f"🎮 CUDA detected: {torch.cuda.get_device_name(0)}")
+                print(f"🎮 CUDA memory: {torch.cuda.get_device_properties(0).total_memory / 1024**3:.1f} GB")
+            else:
+                device = "cpu"
+                print("⚠️ CUDA not available, using CPU")
+        
+        self.device = device
+        print(f"🔧 Initializing U-Net Inpainter on device: {self.device}")
+        
         # Switched to a more recent inpainting model to resolve loading issues.
         model_id = "stabilityai/stable-diffusion-2-inpainting"
         try:
+            # Set torch dtype based on device
+            torch_dtype = torch.float16 if "cuda" in device else torch.float32
+            print(f"🔧 Loading model with dtype: {torch_dtype}")
+            
             self.pipe = StableDiffusionInpaintPipeline.from_pretrained(
                 model_id,
-                torch_dtype=torch.float16 if "cuda" in device else torch.float32,
+                torch_dtype=torch_dtype,
             ).to(device)
-            self.device = device
-            print(f"U-Net Inpainter loaded on {self.device}")
+            
+            print(f"✅ U-Net Inpainter loaded successfully on {self.device}")
             self.is_functional = True
+            
+            # Print GPU memory info if using CUDA
+            if "cuda" in device:
+                print(f"🎮 GPU memory allocated: {torch.cuda.memory_allocated(0) / 1024**3:.2f} GB")
+                print(f"🎮 GPU memory cached: {torch.cuda.memory_reserved(0) / 1024**3:.2f} GB")
+                
         except Exception as e:
-            print(f"Could not load U-Net model from Hugging Face. U-Net will be disabled.")
-            print(f"Error: {e}")
+            print(f"❌ Could not load U-Net model from Hugging Face. U-Net will be disabled.")
+            print(f"❌ Error: {e}")
             self.is_functional = False
 
     def __call__(self, image: np.ndarray, mask: pd.Series, enc_name: str) -> np.ndarray:
         if not self.is_functional:
             return image.copy()  # Passthrough if model failed to load
 
-        # 1. Prepare the mask: create 2D numpy mask from 1D pandas mask
-        mask_np = mask.values
+        # Check memory before processing
+        memory_before = psutil.virtual_memory()
+        print(f"  💾 Memory before {enc_name}-unet: {memory_before.percent:.1f}% ({memory_before.available / (1024**3):.1f} GB available)")
+        
+        # Check GPU memory if using CUDA
+        if "cuda" in self.device:
+            gpu_memory_before = torch.cuda.memory_allocated(0) / 1024**3
+            print(f"  🎮 GPU memory before {enc_name}-unet: {gpu_memory_before:.2f} GB")
+        
+        # CRITICAL FIX: Always resize mask to match image dimensions
+        print(f"  🔧 Original mask size: {len(mask)} points")
+        print(f"  🔧 Target image size: {image.shape[0]}x{image.shape[1]}")
+        
+        # Resize mask to match image size (this is the key fix!)
+        if len(mask) != image.shape[0]:
+            print(f"  🔄 Resizing mask from {len(mask)} to {image.shape[0]} elements...")
+            from scipy.ndimage import zoom
+            zoom_factor = image.shape[0] / len(mask)
+            mask_1d_resized = zoom(mask.values.astype(float), zoom_factor, order=0)
+            mask_1d_resized = mask_1d_resized > 0.5  # Convert back to boolean
+            print(f"  ✅ Mask resized to: {len(mask_1d_resized)} elements")
+        else:
+            mask_1d_resized = mask.values
+
+        # Check if image is too large and resize if needed
+        if image.shape[0] > 512 or image.shape[1] > 512:
+            print(f"  ⚠️ Large image detected: {image.shape[0]}x{image.shape[1]}")
+            print(f"  🔄 Resizing to 512x512 for memory efficiency...")
+            from scipy.ndimage import zoom
+            zoom_factor = 512 / max(image.shape)
+            image_resized = zoom(image, zoom_factor, order=1)
+            # Also resize the mask
+            mask_1d_final = zoom(mask_1d_resized.astype(float), zoom_factor, order=0)
+            mask_1d_final = mask_1d_final > 0.5  # Convert back to boolean
+            print(f"  ✅ Image resized to: {image_resized.shape[0]}x{image_resized.shape[1]}")
+            print(f"  ✅ Mask resized to: {len(mask_1d_final)} elements")
+        else:
+            image_resized = image
+            mask_1d_final = mask_1d_resized
+
+        print(f"  📐 Final sizes: Image {image_resized.shape}, Mask {len(mask_1d_final)} elements")
+
+        # 1. Prepare the mask: create 2D numpy mask from 1D mask
         if enc_name in ["gaf", "mtf", "rp"]:
-            patch_mask = np.logical_or.outer(mask_np, mask_np)
+            print(f"  🎭 Creating 2D mask: {len(mask_1d_final)} x {len(mask_1d_final)} = {len(mask_1d_final)**2:,} pixels")
+            patch_mask = np.logical_or.outer(mask_1d_final, mask_1d_final)
         else:  # spec
-            patch_mask = np.tile(mask_np, (image.shape[0], 1))
+            print(f"  🎭 Creating spec mask: {image_resized.shape[0]} x {len(mask_1d_final)}")
+            patch_mask = np.tile(mask_1d_final, (image_resized.shape[0], 1))
 
         # 2. Convert inputs to PIL Images
-        init_image_pil = Image.fromarray((image * 255).astype(np.uint8)).convert("RGB")
+        init_image_pil = Image.fromarray((image_resized * 255).astype(np.uint8)).convert("RGB")
         mask_image_pil = Image.fromarray((patch_mask * 255).astype(np.uint8)).convert("RGB")
 
         # 3. Run the inpainting pipeline
@@ -111,8 +223,29 @@ class UnetInpainter:
         inpainted_np = np.array(inpainted_result).astype(np.float32) / 255.0
         inpainted_gray = np.mean(inpainted_np, axis=2)  # Convert RGB to grayscale
         
+        # Resize back to original image size if we resized earlier
+        if image.shape != image_resized.shape:
+            from scipy.ndimage import zoom
+            zoom_factor = image.shape[0] / inpainted_gray.shape[0]
+            inpainted_gray = zoom(inpainted_gray, zoom_factor, order=1)
+            patch_mask = zoom(patch_mask, zoom_factor, order=0)
+            patch_mask = patch_mask > 0.5  # Convert back to boolean
+        
         # Enforce that unmasked areas remain unchanged
         inpainted_gray[~patch_mask] = image[~patch_mask]
+
+        # Check memory after processing
+        memory_after = psutil.virtual_memory()
+        print(f"  💾 Memory after {enc_name}-unet: {memory_after.percent:.1f}% ({memory_after.available / (1024**3):.1f} GB available)")
+        memory_used = memory_before.available - memory_after.available
+        print(f"  📊 Memory used: {memory_used / (1024**3):.2f} GB")
+        
+        # Check GPU memory after processing if using CUDA
+        if "cuda" in self.device:
+            gpu_memory_after = torch.cuda.memory_allocated(0) / 1024**3
+            gpu_memory_used = gpu_memory_after - gpu_memory_before
+            print(f"  🎮 GPU memory after {enc_name}-unet: {gpu_memory_after:.2f} GB")
+            print(f"  🎮 GPU memory used: {gpu_memory_used:.2f} GB")
 
         return inpainted_gray
 
@@ -132,14 +265,33 @@ INPAINTERS = {
 
 # --------------------------- INVERSE (stub) --------------------------------
 
-def inverse_identity(image):
-    """Placeholder inverse that flattens the main diagonal (for demo only)."""
+def inverse_identity(image, original_length=None):
+    """Convert image back to time series by flattening the main diagonal and interpolating to original length"""
     diag = np.diag(image)
+    
+    # If original_length is provided, interpolate to match it
+    if original_length is not None and len(diag) != original_length:
+        from scipy.interpolate import interp1d
+        x_old = np.linspace(0, 1, len(diag))
+        x_new = np.linspace(0, 1, original_length)
+        f = interp1d(x_old, diag, kind='linear', bounds_error=False, fill_value='extrapolate')
+        return pd.Series(f(x_new))
+    
     return pd.Series(diag)
 
-def inverse_spectrogram(img):
+def inverse_spectrogram(img, original_length=None):
     # img.shape == (freq_bins, time_bins)
-    return pd.Series(img.mean(axis=0))
+    series = pd.Series(img.mean(axis=0))
+    
+    # If original_length is provided, interpolate to match it
+    if original_length is not None and len(series) != original_length:
+        from scipy.interpolate import interp1d
+        x_old = np.linspace(0, 1, len(series))
+        x_new = np.linspace(0, 1, original_length)
+        f = interp1d(x_old, series.values, kind='linear', bounds_error=False, fill_value='extrapolate')
+        return pd.Series(f(x_new))
+    
+    return series
 
 INVERTERS = {
     "gaf": inverse_identity,
