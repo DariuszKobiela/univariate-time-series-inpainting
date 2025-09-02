@@ -342,9 +342,12 @@ class IterativeExperiment:
             if enc_name not in ENCODERS or inp_name not in INPAINTERS:
                 raise ValueError(f"Unknown encoder {enc_name} or inpainter {inp_name}")
             
-            # Fill NaNs temporarily for encoding
+            # Fill NaNs temporarily for encoding (smoother context)
             mask = damaged_data.isna()
-            series_filled = damaged_data.fillna(0)
+            try:
+                series_filled = damaged_data.interpolate(method='linear', limit_direction='both')
+            except Exception:
+                series_filled = damaged_data.fillna(0)
             
             # Encode to image
             encoder = ENCODERS[enc_name]
@@ -357,7 +360,8 @@ class IterativeExperiment:
             # Inverse transform - pass original length for proper reconstruction
             inverter = INVERTERS[enc_name]
             original_length = len(damaged_data)
-            recon_series = inverter(inpainted_img, original_length)
+            # Pass original series when available for better inverse scaling (e.g., GAF)
+            recon_series = inverter(inpainted_img, original_length, damaged_data)
             
             # Ensure recon_series has the same length as original data
             if len(recon_series) != original_length:

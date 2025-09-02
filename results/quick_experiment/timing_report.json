@@ -1,16 +1,16 @@
 {
   "experiment_summary": {
-    "total_duration_seconds": 2347.5553448200226,
-    "total_duration_formatted": "39.13 minutes (2347.56 seconds)",
+    "total_duration_seconds": 4106.343425512314,
+    "total_duration_formatted": "1.14 hours (8.44 minutes, 4106.34 seconds)",
     "total_inpainting_time_seconds": 0.0,
     "total_inpainting_time_formatted": "0.00 seconds",
     "inpainting_percentage": 0.0,
-    "average_iteration_duration": 234.75553448200225,
+    "average_iteration_duration": 410.6343425512314,
     "average_inpainting_time_per_iteration": 0.0
   },
   "iteration_details": {},
   "system_info": {
-    "timestamp": "2025-08-28T14:01:32.546408",
+    "timestamp": "2025-09-01T18:24:18.344383",
     "platform": {
       "system": "Linux",
       "release": "5.4.0-150-generic",
@@ -26,22 +26,22 @@
     "hardware": {
       "cpu_count_physical": 12,
       "cpu_count_logical": 24,
-      "cpu_freq_current": 2601.392208333333,
+      "cpu_freq_current": 2417.572666666667,
       "cpu_freq_max": 3500.0,
       "memory_total_gb": 62.75,
-      "memory_available_gb": 57.32,
+      "memory_available_gb": 57.67,
       "disk_total_gb": 915.82,
-      "disk_free_gb": 478.0
+      "disk_free_gb": 464.65
     },
     "initial_system_state": {
-      "cpu_percent": 0.0,
-      "memory_percent": 8.6,
-      "disk_percent": 45.0,
+      "cpu_percent": 4.3,
+      "memory_percent": 8.1,
+      "disk_percent": 46.5,
       "boot_time": "2025-07-16T18:37:01",
       "load_average": [
-        2.1,
-        1.83,
-        1.03
+        1.66,
+        1.17,
+        1.11
       ]
     },
     "gpu": "GPUtil not available",

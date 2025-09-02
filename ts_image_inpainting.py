@@ -5,12 +5,13 @@ import numpy as np
 import pandas as pd
 from pyts.image import GramianAngularField, MarkovTransitionField, RecurrencePlot
 from scipy.signal import spectrogram
-from scipy.ndimage import zoom
+from scipy.ndimage import zoom, gaussian_filter
 import matplotlib.pyplot as plt
 import torch
 from diffusers import StableDiffusionInpaintPipeline
 from PIL import Image
 import psutil
+import gc
 
 # ---------------------------- ENCODERS -------------------------------------
 
@@ -28,8 +29,10 @@ def get_optimal_image_size(series_length):
             max_size = 512
         elif available_gb > 2:  # 2+ GB available
             max_size = 256
-        else:  # Less than 2 GB
+        elif available_gb > 1.5:  # 1.5-2 GB available
             max_size = 128
+        else:  # ≤ 1.5 GB
+            max_size = 64
             
         # Don't exceed series length
         optimal_size = min(max_size, series_length)
@@ -45,58 +48,186 @@ def get_optimal_image_size(series_length):
         return 256  # Fallback size
 
 def to_gaf(series, max_size=None):
-    """Convert series to GAF with automatic memory optimization"""
+    """Convert series to GAF with automatic memory optimization.
+
+    Downsample the 1D series to the target length first to avoid O(n^2) issues
+    on very long inputs.
+    """
     if max_size is None:
         max_size = get_optimal_image_size(len(series))
-    
-    print(f"  📊 GAF: Converting {len(series)} points to {max_size}x{max_size} image")
-    transformer = GramianAngularField(method="summation", image_size=max_size)
-    X = transformer.fit_transform(series.values.reshape(1, -1))
+    # Ensure size is a multiple of 8 for diffusion backbones
+    target_len = max(64, (max_size // 8) * 8)
+
+    # Resample series to target_len (linear interpolation)
+    if len(series) != target_len:
+        x_old = np.linspace(0.0, 1.0, num=len(series))
+        x_new = np.linspace(0.0, 1.0, num=target_len)
+        series_resampled = pd.Series(np.interp(x_new, x_old, series.values))
+    else:
+        series_resampled = series
+
+    print(f"  📊 GAF: Converting {len(series)} points (→ {len(series_resampled)}) to {target_len}x{target_len} image")
+    transformer = GramianAngularField(method="summation", image_size=target_len)
+    X = transformer.fit_transform(series_resampled.values.reshape(1, -1))
+    gc.collect()
     return X[0]
 
 def to_mtf(series, max_size=None):
-    """Convert series to MTF with automatic memory optimization"""
+    """Enhanced MTF conversion with better quantization and preprocessing.
+
+    Downsample the 1D series to the target length first to avoid quadratic
+    memory/time when computing the transition field on very long inputs.
+    """
     if max_size is None:
         max_size = get_optimal_image_size(len(series))
+
+    # Ensure size is a multiple of 8 for diffusion backbones
+    target_len = max(64, (max_size // 8) * 8)
+
+    # Resample series to target_len (linear interpolation)
+    if len(series) != target_len:
+        x_old = np.linspace(0.0, 1.0, num=len(series))
+        x_new = np.linspace(0.0, 1.0, num=target_len)
+        series_resampled = pd.Series(np.interp(x_new, x_old, series.values))
+    else:
+        series_resampled = series
+
+    # ENHANCEMENT: Better preprocessing for MTF
+    # 1. Normalize to improve quantization
+    series_normalized = series_resampled.copy()
+    if series_normalized.std() > 0:
+        series_normalized = (series_normalized - series_normalized.mean()) / series_normalized.std()
     
-    print(f"  📊 MTF: Converting {len(series)} points to {max_size}x{max_size} image")
-    transformer = MarkovTransitionField(image_size=max_size)
-    X = transformer.fit_transform(series.values.reshape(1, -1))
-    return X[0]
+    # 2. Apply slight smoothing to reduce noise artifacts
+    from scipy.ndimage import gaussian_filter1d
+    series_smoothed = pd.Series(gaussian_filter1d(series_normalized.values, sigma=0.5))
+
+    print(f"  📊 MTF: Converting {len(series)} points (→ {len(series_resampled)}) to {target_len}x{target_len} image")
+    
+    # 3. Use higher quantization for better transition representation
+    transformer = MarkovTransitionField(image_size=target_len, n_bins=8)  # Increased from default
+    X = transformer.fit_transform(series_smoothed.values.reshape(1, -1))
+    
+    # 4. Post-process MTF to enhance contrast
+    mtf_result = X[0]
+    mtf_result = np.clip(mtf_result, 0, 1)  # Ensure valid range
+    
+    gc.collect()
+    return mtf_result
 
 def to_rp(series, max_size=None):
-    """Convert series to Recurrence Plot with automatic memory optimization"""
+    """Enhanced Recurrence Plot conversion with better parameters and preprocessing.
+
+    Note: pyts.image.RecurrencePlot does not support an `image_size` argument.
+    To control output size safely, we first resample the 1D series to a
+    memory-aware target length, then compute the recurrence plot on the
+    downsampled signal. This avoids quadratic memory/time blowups.
+    """
     if max_size is None:
         max_size = get_optimal_image_size(len(series))
-    
-    print(f"  📊 RP: Converting {len(series)} points to {max_size}x{max_size} image")
-    transformer = RecurrencePlot(image_size=max_size)
-    X = transformer.fit_transform(series.values.reshape(1, -1))
-    return X[0]
 
-def to_spectrogram(series, window=32, target_size=None):
-    """Return a square spectrogram (target_size x target_size).
+    # Ensure size is a multiple of 8 for downstream models
+    target_len = max(64, (max_size // 8) * 8)
+
+    # Resample series to target_len if needed (linear interpolation)
+    if len(series) != target_len:
+        x_old = np.linspace(0.0, 1.0, num=len(series))
+        x_new = np.linspace(0.0, 1.0, num=target_len)
+        series_resampled = pd.Series(np.interp(x_new, x_old, series.values))
+    else:
+        series_resampled = series
+
+    # ENHANCEMENT: Better preprocessing for RP
+    # 1. Normalize for better recurrence detection
+    series_normalized = series_resampled.copy()
+    if series_normalized.std() > 0:
+        series_normalized = (series_normalized - series_normalized.mean()) / series_normalized.std()
+    
+    # 2. Light smoothing to reduce noise while preserving recurrent patterns
+    from scipy.ndimage import gaussian_filter1d
+    series_smoothed = pd.Series(gaussian_filter1d(series_normalized.values, sigma=0.3))
+
+    print(f"  📊 RP: Converting {len(series)} points (→ {len(series_resampled)}) to {target_len}x{target_len} image")
+    
+    # 3. Use optimized threshold for better recurrence detection
+    transformer = RecurrencePlot(threshold='point', percentage=20)  # 20% threshold
+    X = transformer.fit_transform(series_smoothed.values.reshape(1, -1))
+    
+    # 4. Post-process RP to enhance structure
+    rp_result = X[0]
+    
+    # Ensure symmetry (RPs should be symmetric)
+    rp_result = (rp_result + rp_result.T) / 2
+    
+    # Convert to proper range [0, 1]
+    rp_result = rp_result.astype(np.float32)
+    
+    return rp_result
+
+def to_spectrogram(series, window=None, target_size=None):
+    """Enhanced spectrogram conversion with optimized parameters.
 
     The raw spectrogram has shape (freq_bins, time_bins). We generate it with
-    hop length = 1 (noverlap = window-1) to maximise the time resolution, then
-    resample both axes with a bilinear zoom so the result is `target_size`×`target_size`.
-    If `target_size` is not given, it defaults to the length of the input series.
+    optimized window size and overlap, then resample both axes with a bilinear zoom
+    so the result is `target_size`×`target_size`.
     """
     if target_size is None:
-        target_size = len(series)
+        # Cap by available memory and keep consistent with other encoders
+        target_size = get_optimal_image_size(len(series))
+        # Ensure multiple of 8 for diffusion backbones
+        target_size = max(64, (target_size // 8) * 8)
 
+    # ENHANCEMENT: Adaptive window size based on series length
+    if window is None:
+        window = max(16, min(64, len(series) // 8))  # Adaptive window size
+    
+    # ENHANCEMENT: Better preprocessing
+    # 1. Apply window function for better spectral analysis
+    series_values = series.values.copy()
+    
+    # 2. Zero-pad if needed for better frequency resolution
+    if len(series_values) < window * 4:
+        pad_length = window * 4 - len(series_values)
+        series_values = np.pad(series_values, (0, pad_length), mode='edge')
+    
+    # 3. Apply slight tapering to reduce edge effects
+    taper_length = min(window // 4, len(series_values) // 10)
+    if taper_length > 0:
+        taper = np.hanning(2 * taper_length)
+        series_values[:taper_length] *= taper[:taper_length]
+        series_values[-taper_length:] *= taper[taper_length:]
+
+    print(f"  📊 Spectrogram: Converting {len(series)} points to {target_size}x{target_size} image (window={window})")
+
+    # 4. Compute spectrogram with optimized overlap
+    overlap = max(window // 2, window - 4)  # Better time-frequency resolution trade-off
+    
     f, t, Sxx = spectrogram(
-        series.values,
+        series_values,
         fs=1,
         nperseg=window,
-        noverlap=window - 1,
+        noverlap=overlap,
         mode="magnitude",
+        window='hann'  # Better frequency separation
     )
 
-    # scale to square using scipy.ndimage.zoom
-    zoom_r = target_size / Sxx.shape[0]
-    zoom_c = target_size / Sxx.shape[1]
-    Sxx_sq = zoom(Sxx, (zoom_r, zoom_c), order=1)  # bilinear
+    # 5. Log-scale for better dynamic range (common in audio processing)
+    Sxx_log = np.log1p(Sxx)  # log(1 + x) to avoid log(0)
+    
+    # 6. Normalize to [0, 1] range
+    if Sxx_log.max() > Sxx_log.min():
+        Sxx_normalized = (Sxx_log - Sxx_log.min()) / (Sxx_log.max() - Sxx_log.min())
+    else:
+        Sxx_normalized = Sxx_log
+    
+    # 7. Scale to square using scipy.ndimage.zoom
+    zoom_r = target_size / Sxx_normalized.shape[0]
+    zoom_c = target_size / Sxx_normalized.shape[1]
+    Sxx_sq = zoom(Sxx_normalized, (zoom_r, zoom_c), order=1)  # bilinear
+    
+    # 8. Ensure proper range and type
+    Sxx_sq = np.clip(Sxx_sq, 0, 1).astype(np.float32)
+    
     return Sxx_sq
 
 # ---------------------------- INPAINTERS ------------------------------
@@ -133,6 +264,32 @@ class UnetInpainter:
                 torch_dtype=torch_dtype,
             ).to(device)
             
+            # Quality & memory optimizations
+            try:
+                self.pipe.enable_attention_slicing()
+            except Exception:
+                pass
+            try:
+                self.pipe.enable_xformers_memory_efficient_attention()
+                print("✅ Enabled xFormers memory efficient attention")
+            except Exception:
+                print("ℹ️ xFormers not available; continuing without it")
+            try:
+                if "cuda" not in device:
+                    self.pipe.enable_sequential_cpu_offload()
+            except Exception:
+                pass
+
+            # Default inference settings (can be tuned later if needed)
+            self.num_inference_steps = 25
+            self.guidance_scale = 3.0
+            self.negative_prompt = (
+                "no text, no watermark, minimal texture, smooth, continuous gradients,"
+                " scientific heatmap, realistic, coherent"
+            )
+            gen_device = "cuda" if "cuda" in device else "cpu"
+            self.generator = torch.Generator(device=gen_device).manual_seed(42)
+
             print(f"✅ U-Net Inpainter loaded successfully on {self.device}")
             self.is_functional = True
             
@@ -146,6 +303,113 @@ class UnetInpainter:
             print(f"❌ Error: {e}")
             self.is_functional = False
 
+    def _get_adaptive_parameters(self, enc_name: str) -> dict:
+        """Get optimized inpainting parameters for different encoder types"""
+        
+        # Base parameters (optimized for GAF which works well)
+        base_params = {
+            'steps': 25,
+            'guidance': 3.0,
+            'strength': 0.99,
+            'prompt': "high quality, professional, studio lighting, smooth heatmap"
+        }
+        
+        if enc_name == "gaf":
+            # GAF works well with current parameters
+            return base_params
+            
+        elif enc_name == "mtf":
+            # MTF represents transitions - needs different approach
+            return {
+                'steps': 30,  # More steps for better transition modeling
+                'guidance': 4.0,  # Higher guidance for smoother transitions  
+                'strength': 0.95,  # Slightly lower strength to preserve transition structure
+                'prompt': "smooth transition matrix, high quality, professional, coherent patterns, scientific heatmap"
+            }
+            
+        elif enc_name == "rp":
+            # Recurrence plots are symmetric and binary-like
+            return {
+                'steps': 35,  # More steps for complex recurrence patterns
+                'guidance': 5.0,  # Higher guidance for symmetric patterns
+                'strength': 0.90,  # Lower strength to preserve recurrence structure
+                'prompt': "symmetric recurrence pattern, high quality, professional, binary-like structure, scientific visualization"
+            }
+            
+        elif enc_name == "spec":
+            # Spectrograms have frequency structure
+            return {
+                'steps': 40,  # More steps for frequency domain complexity
+                'guidance': 3.5,  # Moderate guidance for frequency coherence
+                'strength': 0.85,  # Lower strength to preserve frequency structure
+                'prompt': "spectrogram frequency analysis, high quality, professional, smooth frequency bands, scientific visualization"
+            }
+        
+        else:
+            # Fallback to base parameters
+            return base_params
+
+    def _create_adaptive_mask(self, mask_1d: np.ndarray, image_shape: tuple, enc_name: str) -> np.ndarray:
+        """Create optimized 2D masks for different encoder types"""
+        
+        if enc_name == "gaf":
+            # GAF: Use outer product for full correlation masking
+            # This works well for GAF since it captures temporal correlations
+            patch_mask = np.logical_or.outer(mask_1d, mask_1d)
+            
+        elif enc_name == "mtf":
+            # MTF: Focus on transition relationships
+            # Create a more sophisticated mask that preserves transition structure
+            patch_mask = np.zeros(image_shape, dtype=bool)
+            
+            # Primary mask: outer product
+            base_mask = np.logical_or.outer(mask_1d, mask_1d)
+            patch_mask = base_mask.copy()
+            
+            # Additional masking for transition paths
+            # Mask diagonals that represent temporal transitions
+            for i in range(len(mask_1d)):
+                if mask_1d[i]:
+                    # Mask nearby transitions (±2 steps)
+                    for offset in [-2, -1, 0, 1, 2]:
+                        if 0 <= i + offset < image_shape[0]:
+                            patch_mask[i, i + offset] = True
+                            patch_mask[i + offset, i] = True
+                            
+        elif enc_name == "rp":
+            # RP: Symmetric masking that preserves recurrence structure
+            patch_mask = np.zeros(image_shape, dtype=bool)
+            
+            # Base symmetric mask
+            base_mask = np.logical_or.outer(mask_1d, mask_1d)
+            patch_mask = base_mask.copy()
+            
+            # Additional symmetric patterns for recurrence preservation
+            for i in range(len(mask_1d)):
+                if mask_1d[i]:
+                    # Create symmetric recurrence patterns
+                    for radius in [1, 2, 3]:
+                        for j in range(max(0, i-radius), min(len(mask_1d), i+radius+1)):
+                            patch_mask[i, j] = True
+                            patch_mask[j, i] = True  # Ensure symmetry
+                            
+        elif enc_name == "spec":
+            # Spectrogram: Vertical bands for time segments
+            # Mask entire frequency bands at missing time points
+            patch_mask = np.tile(mask_1d, (image_shape[0], 1))
+            
+            # Add some frequency smoothing - mask nearby frequencies too
+            smoothed_mask = patch_mask.copy().astype(float)
+            from scipy.ndimage import gaussian_filter
+            smoothed_mask = gaussian_filter(smoothed_mask, sigma=(1.5, 0.5))  # Smooth in frequency, not time
+            patch_mask = smoothed_mask > 0.3  # Threshold back to boolean
+            
+        else:
+            # Fallback: simple outer product
+            patch_mask = np.logical_or.outer(mask_1d, mask_1d)
+            
+        return patch_mask
+
     def __call__(self, image: np.ndarray, mask: pd.Series, enc_name: str) -> np.ndarray:
         if not self.is_functional:
             return image.copy()  # Passthrough if model failed to load
@@ -158,6 +422,10 @@ class UnetInpainter:
         if "cuda" in self.device:
             gpu_memory_before = torch.cuda.memory_allocated(0) / 1024**3
             print(f"  🎮 GPU memory before {enc_name}-unet: {gpu_memory_before:.2f} GB")
+        
+        # ADAPTIVE PARAMETERS: Optimize inpainting parameters based on image type
+        adaptive_params = self._get_adaptive_parameters(enc_name)
+        print(f"  🎯 Using adaptive parameters for {enc_name}: steps={adaptive_params['steps']}, guidance={adaptive_params['guidance']}, strength={adaptive_params['strength']}")
         
         # CRITICAL FIX: Always resize mask to match image dimensions
         print(f"  🔧 Original mask size: {len(mask)} points")
@@ -192,27 +460,39 @@ class UnetInpainter:
 
         print(f"  📐 Final sizes: Image {image_resized.shape}, Mask {len(mask_1d_final)} elements")
 
-        # 1. Prepare the mask: create 2D numpy mask from 1D mask
-        if enc_name in ["gaf", "mtf", "rp"]:
-            print(f"  🎭 Creating 2D mask: {len(mask_1d_final)} x {len(mask_1d_final)} = {len(mask_1d_final)**2:,} pixels")
-            patch_mask = np.logical_or.outer(mask_1d_final, mask_1d_final)
-        else:  # spec
-            print(f"  🎭 Creating spec mask: {image_resized.shape[0]} x {len(mask_1d_final)}")
-            patch_mask = np.tile(mask_1d_final, (image_resized.shape[0], 1))
+        # 1. Prepare the mask: create 2D numpy mask from 1D mask with adaptive strategies
+        patch_mask = self._create_adaptive_mask(mask_1d_final, image_resized.shape, enc_name)
+        print(f"  🎭 Created adaptive {enc_name} mask: {patch_mask.shape} with {patch_mask.sum():,} masked pixels")
 
-        # 2. Convert inputs to PIL Images
-        init_image_pil = Image.fromarray((image_resized * 255).astype(np.uint8)).convert("RGB")
-        mask_image_pil = Image.fromarray((patch_mask * 255).astype(np.uint8)).convert("RGB")
+        # Convert to float mask and softly blur edges for smoother blends
+        blend_mask = patch_mask.astype(np.float32)
+        if blend_mask.any():
+            blend_mask = gaussian_filter(blend_mask, sigma=1.0)
+            blend_mask = np.clip(blend_mask, 0.0, 1.0)
 
-        # 3. Run the inpainting pipeline
+        # 2. Normalize image to [0, 1] for diffusion and convert to PIL
+        img_min = float(image_resized.min())
+        img_max = float(image_resized.max())
+        if img_max > img_min:
+            image_norm01 = (image_resized - img_min) / (img_max - img_min)
+        else:
+            image_norm01 = np.zeros_like(image_resized, dtype=np.float32)
+        init_image_pil = Image.fromarray((image_norm01 * 255).astype(np.uint8)).convert("RGB")
+        mask_image_pil = Image.fromarray((blend_mask * 255).astype(np.uint8)).convert("RGB")
+
+        # 3. Run the inpainting pipeline with adaptive parameters
         # Note: The model operates at a fixed resolution (e.g., 512x512),
         # so we must resize the output back to the original image size.
         original_size = (init_image_pil.width, init_image_pil.height)
         inpainted_result = self.pipe(
-            prompt="high quality, professional, studio lighting",
+            prompt=adaptive_params['prompt'],
             image=init_image_pil,
             mask_image=mask_image_pil,
-            strength=0.99,
+            strength=adaptive_params['strength'],
+            num_inference_steps=adaptive_params['steps'],
+            guidance_scale=adaptive_params['guidance'],
+            negative_prompt=self.negative_prompt,
+            generator=self.generator,
         ).images[0]
 
         # Resize back to original dimensions if necessary
@@ -228,11 +508,14 @@ class UnetInpainter:
             from scipy.ndimage import zoom
             zoom_factor = image.shape[0] / inpainted_gray.shape[0]
             inpainted_gray = zoom(inpainted_gray, zoom_factor, order=1)
-            patch_mask = zoom(patch_mask, zoom_factor, order=0)
-            patch_mask = patch_mask > 0.5  # Convert back to boolean
+            blend_mask = zoom(blend_mask, zoom_factor, order=1)
+            blend_mask = np.clip(blend_mask, 0.0, 1.0)
         
-        # Enforce that unmasked areas remain unchanged
-        inpainted_gray[~patch_mask] = image[~patch_mask]
+        # Denormalize back to original value range before blending
+        inpainted_gray = inpainted_gray * (img_max - img_min) + img_min
+        
+        # Soft blend: preserve context outside mask and reduce seams
+        inpainted_gray = inpainted_gray * blend_mask + image * (1.0 - blend_mask)
 
         # Check memory after processing
         memory_after = psutil.virtual_memory()
@@ -256,16 +539,16 @@ def passthrough_inpainter(image, mask, enc_name: str):
 # Instantiate the U-Net model once
 unet_model = UnetInpainter()
 
-INPAINTERS = {
+INPAINTERS = { #wszystkie pobrane z hugging face
     "unet": unet_model,  # The __call__ method will be invoked
-    "gated_conv": passthrough_inpainter,
-    "ddpm": passthrough_inpainter,
-    "ca_gan": passthrough_inpainter,
+    "gated_conv": passthrough_inpainter,  #Gated Convolutional Networks (Yu et al.)
+    "ddpm": passthrough_inpainter, #Denoising Diffusion Probabilistic Models (DDPM)
+    "ca_gan": passthrough_inpainter, #Contextual Attention GAN
 }
 
 # --------------------------- INVERSE (stub) --------------------------------
 
-def inverse_identity(image, original_length=None):
+def inverse_identity(image, original_length=None, original_series=None):
     """Convert image back to time series by flattening the main diagonal and interpolating to original length"""
     diag = np.diag(image)
     
@@ -279,24 +562,217 @@ def inverse_identity(image, original_length=None):
     
     return pd.Series(diag)
 
-def inverse_spectrogram(img, original_length=None):
-    # img.shape == (freq_bins, time_bins)
-    series = pd.Series(img.mean(axis=0))
+def inverse_mtf(image, original_length=None, original_series=None):
+    """Improved MTF inverse transform using transition matrix structure.
     
-    # If original_length is provided, interpolate to match it
+    MTF represents transitions between quantized values. We can extract
+    more information by analyzing the transition patterns rather than
+    just using the diagonal.
+    """
+    # Method 1: Use anti-diagonal which often contains complementary information
+    anti_diag = np.array([image[i, image.shape[1]-1-i] for i in range(min(image.shape))])
+    
+    # Method 2: Weighted combination of diagonal and anti-diagonal
+    diag = np.diag(image)
+    
+    # Combine diagonal and anti-diagonal with weights
+    # Diagonal represents self-transitions, anti-diagonal represents transitions to opposite states
+    combined = 0.7 * diag + 0.3 * anti_diag
+    
+    # Apply smoothing to reduce noise from inpainting artifacts
+    from scipy.ndimage import gaussian_filter1d
+    combined = gaussian_filter1d(combined, sigma=0.5)
+    
+    # Interpolate to original length if needed
+    if original_length is not None and len(combined) != original_length:
+        from scipy.interpolate import interp1d
+        x_old = np.linspace(0, 1, len(combined))
+        x_new = np.linspace(0, 1, original_length)
+        f = interp1d(x_old, combined, kind='cubic', bounds_error=False, fill_value='extrapolate')
+        combined = f(x_new)
+    
+    # Rescale to original series range if available
+    if original_series is not None:
+        observed = pd.Series(original_series).dropna()
+        if len(observed) > 0:
+            s_min = float(observed.min())
+            s_max = float(observed.max())
+            if s_max > s_min:
+                # Normalize combined to [0,1] then scale to original range
+                c_min, c_max = combined.min(), combined.max()
+                if c_max > c_min:
+                    combined_norm = (combined - c_min) / (c_max - c_min)
+                    combined = combined_norm * (s_max - s_min) + s_min
+    
+    return pd.Series(combined)
+
+def inverse_rp(image, original_length=None, original_series=None):
+    """Improved RP inverse transform using recurrence structure.
+    
+    Recurrence plots are symmetric matrices where RP[i,j] = RP[j,i].
+    We can extract more information by analyzing the recurrence patterns.
+    """
+    # Method 1: Diagonal (self-recurrence)
+    diag = np.diag(image)
+    
+    # Method 2: Average of nearby diagonals (represents close temporal neighbors)
+    n = image.shape[0]
+    temporal_signal = np.zeros(n)
+    
+    # Weighted average of multiple diagonals
+    for offset in range(min(5, n//4)):  # Use nearby diagonals
+        weight = np.exp(-offset * 0.5)  # Exponential decay for farther diagonals
+        
+        # Upper diagonal
+        if offset < n:
+            upper_diag = np.array([image[i, i+offset] for i in range(n-offset)])
+            temporal_signal[:n-offset] += weight * upper_diag
+            
+        # Lower diagonal (symmetric)
+        if offset > 0 and offset < n:
+            lower_diag = np.array([image[i+offset, i] for i in range(n-offset)])
+            temporal_signal[offset:] += weight * lower_diag
+    
+    # Normalize by the number of contributing diagonals
+    temporal_signal = temporal_signal / (2 * min(5, n//4) - 1)
+    
+    # Smooth the signal to reduce inpainting artifacts
+    from scipy.ndimage import gaussian_filter1d
+    temporal_signal = gaussian_filter1d(temporal_signal, sigma=0.8)
+    
+    # Interpolate to original length if needed
+    if original_length is not None and len(temporal_signal) != original_length:
+        from scipy.interpolate import interp1d
+        x_old = np.linspace(0, 1, len(temporal_signal))
+        x_new = np.linspace(0, 1, original_length)
+        f = interp1d(x_old, temporal_signal, kind='cubic', bounds_error=False, fill_value='extrapolate')
+        temporal_signal = f(x_new)
+    
+    # Rescale to original series range if available
+    if original_series is not None:
+        observed = pd.Series(original_series).dropna()
+        if len(observed) > 0:
+            s_min = float(observed.min())
+            s_max = float(observed.max())
+            if s_max > s_min:
+                # Normalize to [0,1] then scale to original range
+                t_min, t_max = temporal_signal.min(), temporal_signal.max()
+                if t_max > t_min:
+                    temporal_signal_norm = (temporal_signal - t_min) / (t_max - t_min)
+                    temporal_signal = temporal_signal_norm * (s_max - s_min) + s_min
+    
+    return pd.Series(temporal_signal)
+
+def inverse_spectrogram(img, original_length=None, original_series=None):
+    """Improved spectrogram inverse transform using multiple reconstruction methods.
+    
+    Instead of just taking the mean across frequencies, we use several methods:
+    1. Weighted frequency averaging (emphasizing lower frequencies)
+    2. Principal component analysis of frequency bands
+    3. Energy-based reconstruction
+    """
+    # img.shape == (freq_bins, time_bins)
+    
+    # Method 1: Weighted average emphasizing lower frequencies (they contain more signal info)
+    freq_bins, time_bins = img.shape
+    freq_weights = np.exp(-np.arange(freq_bins) * 0.2)  # Exponential decay favoring lower frequencies
+    freq_weights = freq_weights / freq_weights.sum()  # Normalize
+    
+    weighted_avg = np.sum(img * freq_weights.reshape(-1, 1), axis=0)
+    
+    # Method 2: Energy-based reconstruction (sum of squares across frequencies)
+    energy_signal = np.sqrt(np.sum(img**2, axis=0))
+    
+    # Method 3: PCA-based reconstruction (first principal component)
+    try:
+        from sklearn.decomposition import PCA
+        # Transpose so that time points are samples and frequencies are features
+        pca = PCA(n_components=1)
+        pca_signal = pca.fit_transform(img.T).flatten()
+        
+        # Normalize PCA signal to match scale of other methods
+        if pca_signal.std() > 0:
+            pca_signal = (pca_signal - pca_signal.mean()) / pca_signal.std()
+            pca_signal = pca_signal * weighted_avg.std() + weighted_avg.mean()
+    except:
+        # Fallback if PCA fails
+        pca_signal = weighted_avg.copy()
+    
+    # Method 4: Dominant frequency tracking
+    dominant_freq_signal = np.array([img[:, i][np.argmax(img[:, i])] for i in range(time_bins)])
+    
+    # Combine methods with weights
+    # Weighted average gets highest weight as it's most stable
+    combined = (0.5 * weighted_avg + 
+                0.2 * energy_signal + 
+                0.2 * pca_signal + 
+                0.1 * dominant_freq_signal)
+    
+    # Apply smoothing to reduce inpainting artifacts
+    from scipy.ndimage import gaussian_filter1d
+    combined = gaussian_filter1d(combined, sigma=1.0)
+    
+    series = pd.Series(combined)
+    
+    # Interpolate to original length if needed
     if original_length is not None and len(series) != original_length:
         from scipy.interpolate import interp1d
         x_old = np.linspace(0, 1, len(series))
         x_new = np.linspace(0, 1, original_length)
-        f = interp1d(x_old, series.values, kind='linear', bounds_error=False, fill_value='extrapolate')
-        return pd.Series(f(x_new))
+        f = interp1d(x_old, series.values, kind='cubic', bounds_error=False, fill_value='extrapolate')
+        series = pd.Series(f(x_new))
+    
+    # Rescale to original series range if available
+    if original_series is not None:
+        observed = pd.Series(original_series).dropna()
+        if len(observed) > 0:
+            s_min = float(observed.min())
+            s_max = float(observed.max())
+            if s_max > s_min:
+                # Normalize to [0,1] then scale to original range
+                series_values = series.values
+                s_series_min, s_series_max = series_values.min(), series_values.max()
+                if s_series_max > s_series_min:
+                    series_norm = (series_values - s_series_min) / (s_series_max - s_series_min)
+                    series = pd.Series(series_norm * (s_max - s_min) + s_min)
     
     return series
 
+def inverse_gaf(img, original_length=None, original_series=None):
+    """Invert a GAF image back to time series using diagonal formula.
+
+    For summation GAF: G_{ii} = cos(2 * phi_i), where x_i = cos(phi_i) with x_i in [-1, 1].
+    We recover: x_i = cos(0.5 * arccos(G_{ii})). Then rescale to the original series range.
+    """
+    diag = np.diag(img).astype(np.float64)
+    # Ensure numerical stability in [-1, 1]
+    diag = np.clip(diag, -1.0, 1.0)
+    phi_half = 0.5 * np.arccos(diag)
+    x_unit = np.cos(phi_half)  # in [-1, 1]
+
+    # Interpolate to original length if needed
+    if original_length is not None and len(x_unit) != original_length:
+        from scipy.interpolate import interp1d
+        x_old = np.linspace(0, 1, len(x_unit))
+        x_new = np.linspace(0, 1, original_length)
+        f = interp1d(x_old, x_unit, kind='linear', bounds_error=False, fill_value='extrapolate')
+        x_unit = f(x_new)
+
+    # Rescale back to observed series range (excluding NaNs)
+    if original_series is not None:
+        observed = pd.Series(original_series).dropna()
+        if len(observed) > 0:
+            s_min = float(observed.min())
+            s_max = float(observed.max())
+            if s_max > s_min:
+                x_rescaled = (x_unit + 1.0) / 2.0 * (s_max - s_min) + s_min
+                return pd.Series(x_rescaled)
+    return pd.Series(x_unit)
+
 INVERTERS = {
-    "gaf": inverse_identity,
-    "mtf": inverse_identity,
-    "rp": inverse_identity,
+    "gaf": inverse_gaf,
+    "mtf": inverse_mtf,
+    "rp": inverse_rp,
     "spec": inverse_spectrogram,
 }
 
@@ -315,7 +791,12 @@ def save_image(img, path):
 def process_series(series: pd.Series, out_dir: Path, dataset_name: str, selected_inpaint_names: list):
     out_dir.mkdir(parents=True, exist_ok=True)
     mask = series.isna()
-    series_filled = series.fillna(0)  # zeros for encoding
+    # Use interpolation for encoding to provide smoother context to the inpainter
+    series_filled = series.copy()
+    try:
+        series_filled = series_filled.interpolate(method='linear', limit_direction='both')
+    except Exception:
+        series_filled = series_filled.fillna(0)
 
     selected_inp_fns = {name: INPAINTERS[name] for name in selected_inpaint_names if name in INPAINTERS}
     if not selected_inp_fns:
@@ -344,7 +825,7 @@ def process_series(series: pd.Series, out_dir: Path, dataset_name: str, selected
 
             # inverse transform (stub)
             inv_fn = INVERTERS[enc_name]
-            recon_series = inv_fn(inpainted)
+            recon_series = inv_fn(inpainted, original_length=len(series), original_series=series)
             # align length
             recon_series.index = series.index[: len(recon_series)]
             merged = series.copy()

@@ -36,8 +36,8 @@ def run_quick_experiment():
     print("="*60)
     print("RUNNING QUICK EXPERIMENT")
     print("="*60)
-    print("Configuration: 3 iterations, MCAR only, GAF-UNet vs 16 traditional methods, XGBoost")
-    print("This should take about 10-15 minutes...")
+    print("Configuration: 10 iterations, MCAR/MAR/MNAR, 4 inpainting vs 16 traditional methods, 3 forecasting models")
+    print("This should take about 20-30 minutes...")
     print()
     
     experiment = IterativeExperiment(
@@ -45,11 +45,11 @@ def run_quick_experiment():
                    "data/0_source_data/pump_sensor_28_univ.csv",
                    "data/0_source_data/vibration_sensor_S1.csv"],
         n_iterations=10,
-        inpainting_models=["gaf-unet"],
-        forecasting_models=["XGBoost"],
+        inpainting_models=["gaf-unet", "mtf-unet", "rp-unet", "spec-unet"],
+        forecasting_models=["XGBoost", "HoltWinters", "Prophet"],
         missingness_types=["MCAR", "MAR", "MNAR"],
         test_size=10,
-        missingness_rates=[0.02, 0.05, 0.10],  # 2%, 5%, 10%
+        missingness_rates=[0.005, 0.02, 0.05, 0.10, 0.20, 0.30],  # 2%, 5%, 10%
         output_dir="results/quick_experiment"
     )
     
