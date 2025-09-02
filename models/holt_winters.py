@@ -8,12 +8,12 @@ def train_holt_winters(train_series: pd.Series, horizon: int, random_state: int 
     """
     # 1. Create a modern "dummy" DatetimeIndex to satisfy the model.
     series = train_series.copy()
-    series.index = pd.date_range(start='2000-01-01', periods=len(series), freq='M')
+    series.index = pd.date_range(start='2000-01-01', periods=len(series), freq='D')
         
     # 2. Train the model
     model = ExponentialSmoothing(
         series,
-        seasonal_periods=12,
+        seasonal_periods=7,  # Weekly seasonality for daily data
         trend="add",
         seasonal="add",
         initialization_method="estimated",

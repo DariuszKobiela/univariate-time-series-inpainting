@@ -9,16 +9,16 @@ def train_prophet(train_series: pd.Series, horizon: int, random_state: int = Non
     # 1. Convert the input series to the required format ['ds', 'y'].
     df = pd.DataFrame({'y': train_series.values})
 
-    # 2. Create a "dummy" date column ('ds') using a monthly frequency to
+    # 2. Create a "dummy" date column ('ds') using a daily frequency to
     #    ensure the date range stays within pandas' valid timestamp bounds.
-    df['ds'] = pd.date_range(start='2000-01-01', periods=len(train_series), freq='M')
+    df['ds'] = pd.date_range(start='2000-01-01', periods=len(train_series), freq='D')
 
     # 3. Train the model
     model = Prophet(yearly_seasonality=False, weekly_seasonality=False, daily_seasonality=False)
     model.fit(df)
 
     # 4. Make future dataframe and forecast
-    future = model.make_future_dataframe(periods=horizon, freq='M')
+    future = model.make_future_dataframe(periods=horizon, freq='D')
     forecast = model.predict(future)
 
     # 5. Return only the forecasted values with the correct integer year index.

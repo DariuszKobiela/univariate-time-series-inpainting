@@ -1,0 +1,59 @@
+{
+  "experiment_summary": {
+    "total_duration_seconds": 4106.343425512314,
+    "total_duration_formatted": "1.14 hours (8.44 minutes, 4106.34 seconds)",
+    "total_inpainting_time_seconds": 0.0,
+    "total_inpainting_time_formatted": "0.00 seconds",
+    "inpainting_percentage": 0.0,
+    "average_iteration_duration": 410.6343425512314,
+    "average_inpainting_time_per_iteration": 0.0
+  },
+  "iteration_details": {},
+  "system_info": {
+    "timestamp": "2025-09-01T18:24:18.344383",
+    "platform": {
+      "system": "Linux",
+      "release": "5.4.0-150-generic",
+      "version": "#167~18.04.1-Ubuntu SMP Wed May 24 00:51:42 UTC 2023",
+      "machine": "x86_64",
+      "processor": "x86_64",
+      "architecture": [
+        "64bit",
+        "ELF"
+      ],
+      "python_version": "3.10.18"
+    },
+    "hardware": {
+      "cpu_count_physical": 12,
+      "cpu_count_logical": 24,
+      "cpu_freq_current": 2417.572666666667,
+      "cpu_freq_max": 3500.0,
+      "memory_total_gb": 62.75,
+      "memory_available_gb": 57.67,
+      "disk_total_gb": 915.82,
+      "disk_free_gb": 464.65
+    },
+    "initial_system_state": {
+      "cpu_percent": 4.3,
+      "memory_percent": 8.1,
+      "disk_percent": 46.5,
+      "boot_time": "2025-07-16T18:37:01",
+      "load_average": [
+        1.66,
+        1.17,
+        1.11
+      ]
+    },
+    "gpu": "GPUtil not available",
+    "environment": {
+      "working_directory": "/home/darek/univariate-time-series-inpainting",
+      "python_executable": "/home/darek/anaconda3/envs/timeseries/bin/python",
+      "environment_variables": {
+        "PATH": "/home/darek/.cursor-server/bin/af58d92614edb1f72bdd756615d131bf8dfa5290/bin/remote-cli:/home/darek/anaconda3/envs/timeseries/bin:/home/darek/anaconda3/condabin:/home/darek/.cursor-server/bin/af58d92614edb1f72bdd756615d131bf8dfa5290/bin/remote-cli:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/usr/games:/usr/local/games:/usr/local/cuda-10.2/bin:/snap/bin:/home/darek/.cursor-server/extensions/ms-python.debugpy-2025.6.0-linux-x64/bundled/scripts/noConfigScripts",
+        "PYTHONPATH": "",
+        "CUDA_VISIBLE_DEVICES": "",
+        "OMP_NUM_THREADS": ""
+      }
+    }
+  }
+}
