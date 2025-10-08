@@ -1,0 +1,17 @@
+{
+  "series_id": 44,
+  "pattern_type": "exponential",
+  "missing_type": "periodic",
+  "missing_rate": 0.24815714155810292,
+  "length": 549,
+  "file_paths": {
+    "original_gaf": "stdiff_training_data/original/000044_gaf.png",
+    "missing_gaf": "stdiff_training_data/missing/000044_gaf.png",
+    "original_mtf": "stdiff_training_data/original/000044_mtf.png",
+    "missing_mtf": "stdiff_training_data/missing/000044_mtf.png",
+    "original_rp": "stdiff_training_data/original/000044_rp.png",
+    "missing_rp": "stdiff_training_data/missing/000044_rp.png",
+    "original_spec": "stdiff_training_data/original/000044_spec.png",
+    "missing_spec": "stdiff_training_data/missing/000044_spec.png"
+  }
+}

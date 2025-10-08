@@ -1,0 +1,17 @@
+{
+  "series_id": 91,
+  "pattern_type": "seasonal",
+  "missing_type": "edge",
+  "missing_rate": 0.2952047964472123,
+  "length": 746,
+  "file_paths": {
+    "original_gaf": "stdiff_training_data/original/000091_gaf.png",
+    "missing_gaf": "stdiff_training_data/missing/000091_gaf.png",
+    "original_mtf": "stdiff_training_data/original/000091_mtf.png",
+    "missing_mtf": "stdiff_training_data/missing/000091_mtf.png",
+    "original_rp": "stdiff_training_data/original/000091_rp.png",
+    "missing_rp": "stdiff_training_data/missing/000091_rp.png",
+    "original_spec": "stdiff_training_data/original/000091_spec.png",
+    "missing_spec": "stdiff_training_data/missing/000091_spec.png"
+  }
+}
