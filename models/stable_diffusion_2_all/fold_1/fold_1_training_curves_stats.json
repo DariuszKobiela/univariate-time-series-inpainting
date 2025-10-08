@@ -1,0 +1,8 @@
+{
+  "best_epoch": 6,
+  "best_val_loss": 0.037669190625092594,
+  "final_train_loss": 0.04525166371606752,
+  "final_val_loss": 0.03953097688343405,
+  "total_epochs": 12,
+  "overfitting_ratio": 0.8735806296862799
+}

@@ -1,0 +1,2 @@
+# Ten plik zapewnia zachowanie struktury folderów w Git
+# Katalog 0_source_data zawiera źródłowe pliki CSV które są ignorowane przez .gitignore

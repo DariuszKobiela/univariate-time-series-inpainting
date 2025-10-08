@@ -1,0 +1,2 @@
+# Ten plik zapewnia zachowanie struktury folderów w Git
+# Katalog 1_missing_data zawiera dane z brakującymi wartościami CSV które są ignorowane przez .gitignore
