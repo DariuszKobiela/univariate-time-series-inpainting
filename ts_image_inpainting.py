@@ -12,6 +12,7 @@ from diffusers import StableDiffusionInpaintPipeline
 from PIL import Image
 import psutil
 import gc
+from models.stdiff import StableDiffusion2MathInpainter
 
 # ---------------------------- ENCODERS -------------------------------------
 
@@ -183,7 +184,7 @@ def to_spectrogram(series, window=None, target_size=None):
     
     # ENHANCEMENT: Better preprocessing
     # 1. Apply window function for better spectral analysis
-    series_values = series.values.copy()
+    series_values = series.values.copy().astype(np.float64)  # Ensure float64 for mathematical operations
     
     # 2. Zero-pad if needed for better frequency resolution
     if len(series_values) < window * 4:
@@ -266,9 +267,14 @@ class UnetInpainter:
             
             # Quality & memory optimizations
             try:
-                self.pipe.enable_attention_slicing()
+                # Nowa składnia dla diffusers 0.34.0+
+                self.pipe.enable_attention_slicing("auto")
             except Exception:
-                pass
+                try:
+                    # Fallback dla starszych wersji
+                    self.pipe.enable_attention_slicing()
+                except Exception:
+                    pass
             try:
                 self.pipe.enable_xformers_memory_efficient_attention()
                 print("✅ Enabled xFormers memory efficient attention")
@@ -538,10 +544,27 @@ def passthrough_inpainter(image, mask, enc_name: str):
 
 # Instantiate the U-Net model once
 unet_model = UnetInpainter()
+# Custom Stable Diffusion 2 multi-type model (trained on GAF, MTF, RP, SPEC)
+custom_stdiff2_model = StableDiffusion2MathInpainter(model_path="models/stable_diffusion_2_all_2/best_model", is_multi_type=True)
+
+custom_stdiff4_model = StableDiffusion2MathInpainter(model_path="models/stable_diffusion_2_all_4/best_model", is_multi_type=True)
+
+# Custom Stable Diffusion 2 multi-type model (trained on GAF, MTF, RP, SPEC)
+custom_stdiff_model = StableDiffusion2MathInpainter(model_path="models/stable_diffusion_2_all/best_model", is_multi_type=True)
+
+# Custom Stable Diffusion 2 model for GAF
+custom_stdiff_gaf_model = StableDiffusion2MathInpainter(model_path="models/stable_diffusion_2_gaf/checkpoint-46000")
+# Custom Stable Diffusion 2 model for all types (newly trained)
+custom_stdiff_all_model = StableDiffusion2MathInpainter(model_path="models/stable_diffusion_2_all/checkpoint-final")
+
 
 INPAINTERS = { #wszystkie pobrane z hugging face
     "unet": unet_model,  # The __call__ method will be invoked
     "gated_conv": passthrough_inpainter,  #Gated Convolutional Networks (Yu et al.)
+    "sd2-gaf": custom_stdiff_gaf_model,  # Custom Stable Diffusion    
+    "sd2-all2": custom_stdiff2_model,  # Custom Stable Diffusion 2 for math images
+    "sd2-all4": custom_stdiff4_model,
+    "sd2-all": custom_stdiff_all_model,  
     "ddpm": passthrough_inpainter, #Denoising Diffusion Probabilistic Models (DDPM)
     "ca_gan": passthrough_inpainter, #Contextual Attention GAN
 }

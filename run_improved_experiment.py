@@ -36,20 +36,23 @@ def run_quick_experiment():
     print("="*60)
     print("RUNNING QUICK EXPERIMENT")
     print("="*60)
-    print("Configuration: 10 iterations, MCAR/MAR/MNAR, 4 inpainting vs 16 traditional methods, 3 forecasting models")
+    print("Configuration: 4 iterations, MCAR, 5 inpainting vs 16 traditional methods, 3 forecasting models, 6 datasets")
     print("This should take about 20-30 minutes...")
     print()
     
     experiment = IterativeExperiment(
         data_paths=["data/0_source_data/boiler_outlet_temp_univ.csv",
                    "data/0_source_data/pump_sensor_28_univ.csv",
-                   "data/0_source_data/vibration_sensor_S1.csv"],
+                   "data/0_source_data/vibration_sensor_S1.csv",
+                   "data/0_source_data/water_level_sensors_2010_L300.csv",
+                   "data/0_source_data/water_level_sensors_2010_L308.csv",
+                   "data/0_source_data/water_level_sensors_2010_L311.csv"],
         n_iterations=10,
-        inpainting_models=["gaf-unet", "mtf-unet", "rp-unet", "spec-unet"],
-        forecasting_models=["XGBoost", "HoltWinters", "Prophet"],
+        inpainting_models=["gaf-unet", "mtf-unet","rp-unet","spec-unet","mtf-sd2-all4", "rp-sd2-all4", "spec-sd2-all4", "gaf-sd2-all4"],
+        forecasting_models=["XGBoost"],#, "HoltWinters"],#, "SARIMAX"],
         missingness_types=["MCAR", "MAR", "MNAR"],
         test_size=10,
-        missingness_rates=[0.005, 0.02, 0.05, 0.10, 0.20, 0.30],  # 2%, 5%, 10%
+        missingness_rates=[0.02, 0.05, 0.20, 0.50],  # 2%, 5%, 10%
         output_dir="results/quick_experiment"
     )
     
@@ -78,14 +81,17 @@ def run_medium_experiment():
     print("="*60)
     print("RUNNING MEDIUM EXPERIMENT")
     print("="*60)
-    print("Configuration: 5 iterations, all missingness types, selected models")
+    print("Configuration: 5 iterations, all missingness types, selected models, 6 datasets")
     print("This should take about 30-45 minutes...")
     print()
     
     experiment = IterativeExperiment(
         data_paths=["data/0_source_data/boiler_outlet_temp_univ.csv",
                    "data/0_source_data/pump_sensor_28_univ.csv",
-                   "data/0_source_data/vibration_sensor_S1.csv"],
+                   "data/0_source_data/vibration_sensor_S1.csv",
+                   "data/0_source_data/water_level_sensors_2010_L300.csv",
+                   "data/0_source_data/water_level_sensors_2010_L308.csv",
+                   "data/0_source_data/water_level_sensors_2010_L311.csv"],
         n_iterations=5,
         inpainting_models=["gaf-unet", "mtf-unet"],
         forecasting_models=["XGBoost", "Prophet"],
@@ -118,7 +124,7 @@ def run_full_experiment():
     print("="*60)
     print("RUNNING FULL EXPERIMENT")
     print("="*60)
-    print("Configuration: 10 iterations, all missingness types, all models")
+    print("Configuration: 10 iterations, all missingness types, all models, 6 datasets")
     print("This will take 2-3 hours. Consider running overnight.")
     print()
     
@@ -130,7 +136,10 @@ def run_full_experiment():
     experiment = IterativeExperiment(
         data_paths=["data/0_source_data/boiler_outlet_temp_univ.csv",
                    "data/0_source_data/pump_sensor_28_univ.csv",
-                   "data/0_source_data/vibration_sensor_S1.csv"],
+                   "data/0_source_data/vibration_sensor_S1.csv",
+                   "data/0_source_data/water_level_sensors_2010_L300.csv",
+                   "data/0_source_data/water_level_sensors_2010_L308.csv",
+                   "data/0_source_data/water_level_sensors_2010_L311.csv"],
         n_iterations=10,
         inpainting_models=["gaf-unet", "mtf-unet", "rp-unet", "spec-unet"],
         forecasting_models=["XGBoost", "Prophet", "SARIMAX", "HoltWinters"],
@@ -221,7 +230,10 @@ def main():
     parser.add_argument("--data", nargs='+', 
                        default=["data/0_source_data/boiler_outlet_temp_univ.csv",
                                "data/0_source_data/pump_sensor_28_univ.csv",
-                               "data/0_source_data/vibration_sensor_S1.csv"],
+                               "data/0_source_data/vibration_sensor_S1.csv",
+                               "data/0_source_data/water_level_sensors_2010_L300.csv",
+                               "data/0_source_data/water_level_sensors_2010_L308.csv",
+                               "data/0_source_data/water_level_sensors_2010_L311.csv"],
                        help="Paths to the datasets (can specify multiple)")
     parser.add_argument("--iterations", type=int, default=5,
                        help="Number of iterations to run")
@@ -231,7 +243,7 @@ def main():
                        help="Rates of missingness to introduce (e.g., 0.02 0.05 0.10)")
     parser.add_argument("--inpainting_models", nargs='+',
                        default=["gaf-unet"],
-                       help="Inpainting models to use (gaf-unet, mtf-unet, rp-unet, spec-unet)")
+                       help="Inpainting models to use (gaf-unet, mtf-unet, rp-unet, spec-unet, gaf-sd2-gaf)")
     parser.add_argument("--forecasting_models", nargs='+',
                        default=["XGBoost"],
                        help="Forecasting models to use (XGBoost, Prophet, SARIMAX, HoltWinters)")
