@@ -1,0 +1,37 @@
+# Stable Diffusion 2 Fine-tuning Requirements
+
+# Core ML/DL
+torch>=1.12.0
+torchvision>=0.13.0
+torchaudio>=0.12.0
+
+# Diffusers and transformers
+diffusers>=0.21.0
+transformers>=4.21.0
+accelerate>=0.20.0
+xformers>=0.0.20
+
+# Image processing
+Pillow>=9.0.0
+opencv-python>=4.5.0
+
+# Data science
+numpy>=1.21.0
+pandas>=1.4.0
+scikit-learn>=1.1.0
+scipy>=1.8.0
+matplotlib>=3.5.0
+
+# Progress and utilities
+tqdm>=4.64.0
+psutil>=5.9.0
+
+# Audio/signal processing (for spectrograms)
+librosa>=0.9.0  
+
+# Time series imaging
+pyts>=0.12.0
+
+# Optional: for better performance
+# tensorboard>=2.9.0  # Training visualization
+# wandb>=0.13.0       # Experiment tracking

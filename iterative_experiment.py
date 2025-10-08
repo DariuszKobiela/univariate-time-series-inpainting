@@ -48,12 +48,15 @@ class IterativeExperiment:
                  missingness_rates: List[float] = None,
                  output_dir: str = "results/iterative_experiment"):
         
-        # Default data paths for the 3 datasets
+        # Default data paths for the 6 datasets
         if data_paths is None:
             self.data_paths = [
                 "data/0_source_data/boiler_outlet_temp_univ.csv",
                 "data/0_source_data/pump_sensor_28_univ.csv", 
-                "data/0_source_data/vibration_sensor_S1.csv"
+                "data/0_source_data/vibration_sensor_S1.csv",
+                "data/0_source_data/water_level_sensors_2010_L300.csv",
+                "data/0_source_data/water_level_sensors_2010_L308.csv",
+                "data/0_source_data/water_level_sensors_2010_L311.csv"
             ]
         else:
             self.data_paths = data_paths
@@ -89,6 +92,12 @@ class IterativeExperiment:
         # Create data processing directories
         os.makedirs("data/1_missing_data", exist_ok=True)
         os.makedirs("data/2_fixed_data", exist_ok=True)
+        
+        # Create image inpainting directories
+        os.makedirs("data/images_inpainting/0_original_images", exist_ok=True)
+        os.makedirs("data/images_inpainting/1_missing_images", exist_ok=True)
+        os.makedirs("data/images_inpainting/2_fixed_images", exist_ok=True)
+        os.makedirs("data/images_inpainting/3_difference_images", exist_ok=True)
         
         # Initialize timing and system tracking
         self.timing_data = {
@@ -193,11 +202,17 @@ class IterativeExperiment:
         self.test_data = []
         self.original_dataframes = []  # NEW: Store original DataFrames with timestamps
         
-        dataset_names = ["boiler", "pump", "vibr"]
+        dataset_names = ["boiler", "pump", "vibr", "lake1", "lake2", "lake3"]
         
         for i, data_path in enumerate(self.data_paths):
             try:
-                df = pd.read_csv(data_path, index_col=0)
+                # Handle different CSV formats for different datasets
+                if "water_level_sensors" in data_path:
+                    # Lake datasets use semicolon separator and comma decimal separator
+                    df = pd.read_csv(data_path, index_col=0, sep=';', decimal=',')
+                else:
+                    # Standard datasets use default separators
+                    df = pd.read_csv(data_path, index_col=0)
                 series_data = df.iloc[:, 0]  # Assuming first column is the time series
                 
                 # Store the original DataFrame with timestamps for degradation
@@ -327,17 +342,21 @@ class IterativeExperiment:
         
         return data_copy
     
-    def apply_inpainting_repair(self, damaged_data: pd.Series, method: str) -> tuple:
+    def apply_inpainting_repair(self, damaged_data: pd.Series, method: str, 
+                               dataset_name: str = None, missingness_type: str = None, 
+                               missing_rate: int = None, iteration: int = None) -> tuple:
         """Apply image inpainting repair methods and return repaired data with timing"""
         start_time = time.time()
         
         try:
-            # Extract encoder and inpainter from method name (e.g., "gaf-unet")
+            # Extract encoder and inpainter from method name (e.g., "gaf-unet" or "gaf-sd2-gaf")
             parts = method.split('-')
-            if len(parts) != 2:
+            if len(parts) < 2:
                 raise ValueError(f"Invalid inpainting method format: {method}")
             
-            enc_name, inp_name = parts
+            # Handle cases like "gaf-sd2-gaf" where inpainter name contains dashes
+            enc_name = parts[0]
+            inp_name = '-'.join(parts[1:])  # Join all parts after encoder name
             
             if enc_name not in ENCODERS or inp_name not in INPAINTERS:
                 raise ValueError(f"Unknown encoder {enc_name} or inpainter {inp_name}")
@@ -353,9 +372,44 @@ class IterativeExperiment:
             encoder = ENCODERS[enc_name]
             img = encoder(series_filled)
             
+            # Save missing image if parameters provided
+            if dataset_name and missingness_type and missing_rate is not None and iteration is not None:
+                # Create base name from CSV file name (without .csv extension)
+                dataset_base_name = f"{dataset_name}_{missingness_type}_{missing_rate}p_{iteration}"
+                missing_filename = f"{dataset_base_name}_imagemissing_{enc_name}.png"
+                missing_filepath = f"data/images_inpainting/1_missing_images/{missing_filename}"
+                self.save_image(img, missing_filepath)
+                print(f"        💾 Saved missing image: {missing_filename}")
+            
             # Apply inpainting
             inpainter = INPAINTERS[inp_name]
             inpainted_img = inpainter(img, mask, enc_name)
+            
+            # Save fixed image if parameters provided
+            if dataset_name and missingness_type and missing_rate is not None and iteration is not None:
+                # Create base name from CSV file name (without .csv extension)
+                dataset_base_name = f"{dataset_name}_{missingness_type}_{missing_rate}p_{iteration}"
+                fixed_filename = f"{dataset_base_name}_imagefixed_{enc_name}_{inp_name}.png"
+                fixed_filepath = f"data/images_inpainting/2_fixed_images/{fixed_filename}"
+                self.save_image(inpainted_img, fixed_filepath)
+                print(f"        💾 Saved fixed image: {fixed_filename}")
+                
+                # Calculate and save difference image (|fixed - missing|)
+                try:
+                    # Calculate absolute difference between fixed and missing images
+                    difference_img = np.abs(inpainted_img - img)
+                    
+                    # Create difference filename
+                    difference_filename = f"{dataset_base_name}_imagedifference_{enc_name}_{inp_name}.png"
+                    difference_filepath = f"data/images_inpainting/3_difference_images/{difference_filename}"
+                    
+                    # Save difference image
+                    self.save_image(difference_img, difference_filepath)
+                    print(f"        📊 Saved difference image: {difference_filename}")
+                    
+                except Exception as e:
+                    print(f"        ⚠️  Warning: Could not create difference image: {e}")
+                    # Continue execution even if difference image creation fails
             
             # Inverse transform - pass original length for proper reconstruction
             inverter = INVERTERS[enc_name]
@@ -454,7 +508,7 @@ class IterativeExperiment:
             print(f"\n🔄 Creating degraded datasets for iteration {iteration + 1}/{self.n_iterations}...")
             
             for dataset_idx in range(len(self.train_data)):
-                dataset_name = ["boiler", "pump", "vibr"][dataset_idx]
+                dataset_name = ["boiler", "pump", "vibr", "lake1", "lake2", "lake3"][dataset_idx]
                 print(f"  Processing dataset {dataset_idx + 1} ({dataset_name})...")
                 
                 # Get original DataFrame with timestamps (only training part)
@@ -467,6 +521,11 @@ class IterativeExperiment:
                     for rate in self.missingness_rates:
                         rate_percent = int(rate * 100)  # Convert to percentage for filename
                         print(f"      With {rate_percent}% missing data...")
+                        
+                        # Check if file already exists
+                        if self.missing_data_file_exists(dataset_name, missingness_type, rate_percent, iteration + 1):
+                            print(f"        ⏭️  Skipping generation (file already exists)")
+                            continue
                         
                         # Generate missingness for this dataset at this rate (each iteration gets different random pattern)
                         # Set different seed for each iteration to ensure different missing patterns
@@ -481,7 +540,7 @@ class IterativeExperiment:
                         output_filename = f"{dataset_name}_{missingness_type}_{rate_percent}p_{iteration + 1}.csv"
                         output_path = f"data/1_missing_data/{output_filename}"
                         degraded_df.to_csv(output_path)  # Keep index=True to save timestamps
-                        print(f"        Saved: {output_path}")
+                        print(f"        ✅ Saved: {output_path}")
         
         # Reset seed for reproducibility in other parts
         np.random.seed(42)
@@ -499,7 +558,7 @@ class IterativeExperiment:
             print(f"\n🔄 Repairing datasets for iteration {iteration + 1}/{self.n_iterations}...")
             
             for dataset_idx in range(len(self.train_data)):
-                dataset_name = ["boiler", "pump", "vibr"][dataset_idx]
+                dataset_name = ["boiler", "pump", "vibr", "lake1", "lake2", "lake3"][dataset_idx]
                 print(f"  Processing dataset {dataset_idx + 1} ({dataset_name})...")
                 
                 for missingness_type in self.missingness_types:
@@ -510,6 +569,12 @@ class IterativeExperiment:
                         # Load degraded dataset from 1_missing_data
                         degraded_file = f"data/1_missing_data/{dataset_name}_{missingness_type}_{rate_percent}p_{iteration + 1}.csv"
                         
+                        # Check if degraded file exists - if not, skip this combination
+                        if not os.path.exists(degraded_file):
+                            print(f"    ⚠️  Missing data file not found: {degraded_file}")
+                            print(f"        This combination will be skipped")
+                            continue
+                        
                         try:
                             # Load with timestamps
                             df = pd.read_csv(degraded_file, index_col=0)
@@ -519,9 +584,17 @@ class IterativeExperiment:
                             for repair_method in all_repair_methods:
                                 print(f"      Applying repair method: {repair_method}")
                                 
+                                # Check if repaired file already exists
+                                if self.fixed_data_file_exists(dataset_name, missingness_type, rate_percent, iteration + 1, repair_method):
+                                    print(f"        ⏭️  Skipping repair (file already exists)")
+                                    continue
+                                
                                 # Apply repair
                                 if repair_method in self.inpainting_models:
-                                    repaired_series, _ = self.apply_inpainting_repair(damaged_series, repair_method)
+                                    repaired_series, _ = self.apply_inpainting_repair(
+                                        damaged_series, repair_method, 
+                                        dataset_name, missingness_type, rate_percent, iteration + 1
+                                    )
                                 else:
                                     repaired_series = self.apply_non_inpainting_repair(damaged_series, repair_method)
                                 
@@ -536,7 +609,7 @@ class IterativeExperiment:
                                 
                                 # Save repaired dataset
                                 repaired_df.to_csv(output_path)
-                                print(f"        Saved: {output_path}")
+                                print(f"        ✅ Saved: {output_path}")
                                 
                         except Exception as e:
                             print(f"        ❌ Error processing {degraded_file}: {e}")
@@ -553,18 +626,30 @@ class IterativeExperiment:
         # Split by underscore
         parts = base_name.split('_')
         
-        if len(parts) < 5:
-            raise ValueError(f"Invalid filename format: {filename}")
+        # Handle both formats:
+        # Format 1 (missing data): dataset_missingness_ratep_iteration (4 parts)
+        # Format 2 (fixed data): dataset_missingness_ratep_iteration_method (5+ parts)
         
-        # Parse: dataset_missingness_ratep_iteration_method
+        if len(parts) < 4:
+            raise ValueError(f"Invalid filename format: {filename} - expected at least 4 parts")
+        
+        # Parse common parts: dataset_missingness_ratep_iteration
         dataset_name = parts[0]
         missingness_type = parts[1] 
         rate_with_p = parts[2]  # e.g., "2p"
         iteration_nr = int(parts[3])
-        fixing_method_clean = "_".join(parts[4:])  # Handle multi-part method names
         
         # Extract rate from "2p" format
         missing_rate = int(rate_with_p.replace('p', ''))
+        
+        # Parse method name if present (for fixed data files)
+        if len(parts) >= 5:
+            fixing_method_clean = "_".join(parts[4:])  # Handle multi-part method names
+            fixing_method_original = self.reverse_clean_method_name(fixing_method_clean)
+        else:
+            # For missing data files, there's no method
+            fixing_method_clean = None
+            fixing_method_original = None
         
         return {
             'dataset': dataset_name,
@@ -572,7 +657,7 @@ class IterativeExperiment:
             'missing_rate': missing_rate,
             'iteration_nr': iteration_nr,
             'fixing_method_clean': fixing_method_clean,
-            'fixing_method_original': self.reverse_clean_method_name(fixing_method_clean)
+            'fixing_method_original': fixing_method_original
         }
     
     def reverse_clean_method_name(self, clean_name: str) -> str:
@@ -586,6 +671,7 @@ class IterativeExperiment:
             'mtfunet': 'mtf-unet', 
             'rpunet': 'rp-unet',
             'specunet': 'spec-unet',
+            'gafsd2gaf': 'gaf-sd2-gaf',
             'imputemean': 'impute_mean',
             'imputemedian': 'impute_median',
             'imputemode': 'impute_mode',
@@ -602,6 +688,93 @@ class IterativeExperiment:
         }
         
         return mappings.get(clean_name, clean_name)
+    
+    def file_matches_experiment_params(self, filename: str, missingness_type: str = None, 
+                                     missing_rate: int = None, iteration: int = None,
+                                     dataset_name: str = None) -> bool:
+        """
+        Check if a file matches the current experiment parameters.
+        This ensures we only use files that are relevant to the current experiment setup.
+        """
+        try:
+            metadata = self.parse_filename(filename)
+            
+            # Check dataset name if specified
+            if dataset_name and metadata['dataset'] != dataset_name:
+                return False
+            
+            # Check missingness type if specified
+            if missingness_type and metadata['missing_data_type'] != missingness_type:
+                return False
+            
+            # Check missing rate if specified
+            if missing_rate is not None and metadata['missing_rate'] != missing_rate:
+                return False
+            
+            # Check iteration if specified
+            if iteration is not None and metadata['iteration_nr'] != iteration:
+                return False
+            
+            # Additional checks: ensure the file parameters are within our current experiment scope
+            # Check if missingness type is in our current experiment
+            if metadata['missing_data_type'] not in self.missingness_types:
+                return False
+            
+            # Check if missing rate is in our current experiment (convert to percentage)
+            rate_as_float = metadata['missing_rate'] / 100.0
+            if rate_as_float not in self.missingness_rates:
+                return False
+            
+            # Check if iteration is within our current experiment range
+            if metadata['iteration_nr'] > self.n_iterations:
+                return False
+            
+            return True
+            
+        except Exception as e:
+            print(f"Warning: Could not parse filename {filename}: {e}")
+            return False
+    
+    def missing_data_file_exists(self, dataset_name: str, missingness_type: str, 
+                                rate_percent: int, iteration: int) -> bool:
+        """Check if a missing data file already exists for given parameters"""
+        filename = f"{dataset_name}_{missingness_type}_{rate_percent}p_{iteration}.csv"
+        filepath = f"data/1_missing_data/{filename}"
+        exists = os.path.exists(filepath)
+        if exists:
+            print(f"      ✓ Missing data file already exists: {filename}")
+        return exists
+    
+    def fixed_data_file_exists(self, dataset_name: str, missingness_type: str, 
+                              rate_percent: int, iteration: int, repair_method: str) -> bool:
+        """Check if a fixed data file already exists for given parameters"""
+        clean_method = self.clean_method_name(repair_method)
+        filename = f"{dataset_name}_{missingness_type}_{rate_percent}p_{iteration}_{clean_method}.csv"
+        filepath = f"data/2_fixed_data/{filename}"
+        exists = os.path.exists(filepath)
+        if exists:
+            print(f"        ✓ Fixed data file already exists: {filename}")
+        return exists
+    
+    def filter_files_by_experiment_params(self, directory: str) -> List[str]:
+        """
+        Filter files in a directory to only include those that match current experiment parameters.
+        This is crucial for ensuring we only process files relevant to the current experiment.
+        """
+        if not os.path.exists(directory):
+            return []
+        
+        all_files = [f for f in os.listdir(directory) if f.endswith('.csv')]
+        filtered_files = []
+        
+        for filename in all_files:
+            if self.file_matches_experiment_params(filename):
+                filtered_files.append(filename)
+            else:
+                print(f"  ⏭️  Skipping file (doesn't match experiment params): {filename}")
+        
+        print(f"  📊 Filtered {len(all_files)} files down to {len(filtered_files)} matching current experiment")
+        return filtered_files
     
     def load_repaired_dataset_by_path(self, file_path: str) -> pd.Series:
         """Load a repaired dataset by full file path"""
@@ -640,16 +813,19 @@ class IterativeExperiment:
             }
         }
         
-        # List all files in 2_fixed_data
+        # List and filter files in 2_fixed_data to match current experiment parameters
         fixed_data_dir = "data/2_fixed_data"
         
         if not os.path.exists(fixed_data_dir):
             raise FileNotFoundError(f"Fixed data directory not found: {fixed_data_dir}")
         
-        csv_files = [f for f in os.listdir(fixed_data_dir) if f.endswith('.csv')]
+        print(f"🔍 Filtering files to match current experiment parameters...")
+        print(f"  Current experiment: {self.n_iterations} iterations, {self.missingness_types} missingness types, {[int(r*100) for r in self.missingness_rates]}% rates")
+        
+        csv_files = self.filter_files_by_experiment_params(fixed_data_dir)
         total_forecasting_tasks = len(csv_files) * len(self.forecasting_models)
         
-        print(f"Found {len(csv_files)} repaired datasets")
+        print(f"📊 Found {len(csv_files)} repaired datasets matching current experiment")
         print(f"Will perform {total_forecasting_tasks} forecasting tasks ({len(csv_files)} datasets × {len(self.forecasting_models)} models)")
         
         processed_count = 0
@@ -667,7 +843,7 @@ class IterativeExperiment:
                 repaired_data = self.load_repaired_dataset_by_path(file_path)
                 
                 # Get test data for this dataset
-                dataset_names = ["boiler", "pump", "vibr"]
+                dataset_names = ["boiler", "pump", "vibr", "lake1", "lake2", "lake3"]
                 try:
                     dataset_idx = dataset_names.index(metadata['dataset'])
                     test_data = self.test_data[dataset_idx]
@@ -734,6 +910,88 @@ class IterativeExperiment:
         
         return results
     
+    def forecast_on_original_data(self, forecasting_results: Dict[str, Any]) -> Dict[str, Any]:
+        """Phase 4: Run forecasting on original datasets as baseline"""
+        print(f"\n🔬 PHASE 4: Running forecasting on original datasets (baseline)...")
+        
+        original_forecasting_start_time = time.time()
+        
+        # Get dataset names for consistent mapping
+        dataset_names = ["boiler", "pump", "vibr", "lake1", "lake2", "lake3"]
+        
+        # Counter for progress tracking
+        total_original_tasks = len(self.train_data) * len(self.forecasting_models)
+        processed_original_count = 0
+        
+        print(f"📊 Will perform {total_original_tasks} baseline forecasting tasks")
+        print(f"   ({len(self.train_data)} datasets × {len(self.forecasting_models)} models)")
+        
+        for dataset_idx, train_data in enumerate(self.train_data):
+            dataset_name = dataset_names[dataset_idx]
+            test_data = self.test_data[dataset_idx]
+            
+            print(f"\n📁 Processing original dataset: {dataset_name}")
+            
+            for forecast_model in self.forecasting_models:
+                print(f"    🔮 Forecasting with: {forecast_model}")
+                
+                try:
+                    # Make predictions on original (undamaged) data
+                    predictions = self.forecast_next_points(train_data, forecast_model)
+                    
+                    # Calculate metrics
+                    metrics = self.calculate_metrics(test_data.values, predictions)
+                    
+                    # For each combination of experiment parameters, add an entry
+                    # This ensures the original predictions can be compared to all repair methods
+                    for missingness_type in self.missingness_types:
+                        for rate in self.missingness_rates:
+                            rate_percent = int(rate * 100)
+                            for iteration in range(1, self.n_iterations + 1):
+                                
+                                # Create result row for original data prediction
+                                result_row = {
+                                    'dataset': dataset_name,
+                                    'missing_data_type': missingness_type,
+                                    'missing_rate': rate_percent,
+                                    'iteration_nr': iteration,
+                                    'fixing_method': 'original',  # Key identifier for baseline
+                                    'prediction_method': forecast_model,
+                                    'MAPE': metrics['MAPE'],
+                                    'MAE': metrics['MAE'],
+                                    'RMSE': metrics['RMSE']
+                                }
+                                
+                                # Add to results dataframe list
+                                forecasting_results['results_dataframe'].append(result_row)
+                    
+                    processed_original_count += 1
+                    progress = (processed_original_count / total_original_tasks) * 100
+                    print(f"      ✓ Completed baseline prediction ({progress:.1f}% baseline progress)")
+                    
+                except Exception as e:
+                    print(f"      ❌ Original forecasting failed with {forecast_model}: {e}")
+        
+        # Record timing
+        original_forecasting_end_time = time.time()
+        original_forecasting_duration = original_forecasting_end_time - original_forecasting_start_time
+        
+        # Add timing information to results
+        forecasting_results['timing']['original_forecasting_duration'] = original_forecasting_duration
+        forecasting_results['timing']['original_forecasting_end_time'] = datetime.now().isoformat()
+        
+        # Count how many baseline entries were added
+        baseline_entries = len([row for row in forecasting_results['results_dataframe'] 
+                               if row.get('fixing_method') == 'original'])
+        
+        print(f"\n✅ Original dataset forecasting completed!")
+        print(f"   - Baseline forecasting time: {original_forecasting_duration:.2f} seconds")
+        print(f"   - Processed: {processed_original_count}/{total_original_tasks} baseline tasks")
+        print(f"   - Added: {baseline_entries} baseline entries to results")
+        print(f"   - Total results now: {len(forecasting_results['results_dataframe'])} rows")
+        
+        return forecasting_results
+    
     def run_experiment(self) -> Dict[str, Any]:
         """Run the complete iterative experiment"""
         # Start experiment timing
@@ -749,6 +1007,9 @@ class IterativeExperiment:
         print(f"  - Non-inpainting methods: {self.non_inpainting_methods}")
         print(f"  - Forecasting models: {self.forecasting_models}")
         print(f"  - Test size: {self.test_size}")
+        
+        # PHASE 0: Generate original images for visualization
+        self.generate_original_images()
         
         # PHASE 1: Generate and save all degraded datasets for all iterations
         self.generate_and_save_degraded_datasets()
@@ -767,7 +1028,10 @@ class IterativeExperiment:
         # PHASE 3: Run forecasting on all repaired datasets
         forecasting_results = self.run_forecasting_phase()
         
-        # Save forecasting results
+        # PHASE 4: Run forecasting on original datasets as baseline
+        forecasting_results = self.forecast_on_original_data(forecasting_results)
+        
+        # Save forecasting results (now includes both repaired and original predictions)
         with open(f"{self.output_dir}/forecasting_results.json", 'w') as f:
             json.dump(forecasting_results, f, indent=2)
         
@@ -934,6 +1198,48 @@ class IterativeExperiment:
         print(f"  - Timing: {self.output_dir}/timing_report.json")
         
         print("="*60)
+    
+    def save_image(self, img, path):
+        """Save image using matplotlib with viridis colormap"""
+        plt.imsave(path, img, cmap="viridis")
+    
+    def generate_original_images(self):
+        """Generate and save original images for each dataset and encoder method"""
+        print("\n🖼️ GENERATING ORIGINAL IMAGES...")
+        
+        dataset_names = ["boiler", "pump", "vibr", "lake1", "lake2", "lake3"]
+        
+        for dataset_idx, train_data in enumerate(self.train_data):
+            dataset_name = dataset_names[dataset_idx]
+            print(f"  📊 Processing dataset: {dataset_name}")
+            
+            # Get encoder names from inpainting models (e.g., "gaf-unet" -> "gaf")
+            encoder_names = []
+            for inpainting_method in self.inpainting_models:
+                parts = inpainting_method.split('-')
+                if len(parts) >= 1:
+                    encoder_names.append(parts[0])  # Extract encoder name
+            
+            # Remove duplicates while preserving order
+            encoder_names = list(dict.fromkeys(encoder_names))
+            
+            for enc_name in encoder_names:
+                if enc_name in ENCODERS:
+                    print(f"    🔧 Creating {enc_name} image...")
+                    
+                    # Create image using encoder
+                    encoder = ENCODERS[enc_name]
+                    img = encoder(train_data)
+                    
+                    # Create filename: dataset_image_encoder
+                    filename = f"{dataset_name}_image_{enc_name}.png"
+                    filepath = f"data/images_inpainting/0_original_images/{filename}"
+                    
+                    # Save image
+                    self.save_image(img, filepath)
+                    print(f"      ✅ Saved: {filepath}")
+        
+        print("✅ All original images generated!")
     
     def create_final_dataframe(self, forecasting_results: Dict) -> pd.DataFrame:
         """Create the final results dataframe from forecasting results"""
