@@ -1,0 +1,26 @@
+# Ignoruj wszystkie pliki PNG
+*.png
+
+# Ignoruj również pliki PNG w podfolderach
+**/*.png
+
+# Ignoruj pliki CSV z folderu data/ i jego podfolderów
+data/**/*.csv
+
+# Ignoruj pliki cache i tymczasowe pliki Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+*.so
+.Python
+
+# Ignoruj duże pliki modeli (dodaj konkretne rozszerzenia jeśli potrzebne)
+models/**/*.safetensors
+models/**/*.bin
+models/**/*.ckpt
+models/**/*.pt
+models/**/*.pth
+
+# Zachowaj strukturę folderów (nie ignoruj plików .gitkeep)
+!.gitkeep
