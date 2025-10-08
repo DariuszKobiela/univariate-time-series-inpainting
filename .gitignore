@@ -21,6 +21,17 @@ models/**/*.bin
 models/**/*.ckpt
 models/**/*.pt
 models/**/*.pth
+models/**/*.json
+models/**/*.txt
+models/**/*.log
+models/**/*.log.gz
+models/**/*.log.tar.gz
+models/**/*.log.tar.bz2
+models/**/*.log.tar.xz
+models/**/*.log.tar.lzma
+models/**/*.log.tar.lz4
+models/**/*.log.tar.zstd
+models/**/*.log.tar.zstd
 
 # Zachowaj strukturę folderów (nie ignoruj plików .gitkeep)
 !.gitkeep

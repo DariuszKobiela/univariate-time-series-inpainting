@@ -1,0 +1,17 @@
+{
+  "series_id": 1284,
+  "pattern_type": "exponential",
+  "missing_type": "random",
+  "missing_rate": 0.132140199460489,
+  "length": 331,
+  "file_paths": {
+    "original_gaf": "stdiff_training_data/original/001284_gaf.png",
+    "missing_gaf": "stdiff_training_data/missing/001284_gaf.png",
+    "original_mtf": "stdiff_training_data/original/001284_mtf.png",
+    "missing_mtf": "stdiff_training_data/missing/001284_mtf.png",
+    "original_rp": "stdiff_training_data/original/001284_rp.png",
+    "missing_rp": "stdiff_training_data/missing/001284_rp.png",
+    "original_spec": "stdiff_training_data/original/001284_spec.png",
+    "missing_spec": "stdiff_training_data/missing/001284_spec.png"
+  }
+}

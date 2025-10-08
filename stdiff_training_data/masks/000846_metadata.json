@@ -1,0 +1,17 @@
+{
+  "series_id": 846,
+  "pattern_type": "trend",
+  "missing_type": "edge",
+  "missing_rate": 0.27045157602673614,
+  "length": 547,
+  "file_paths": {
+    "original_gaf": "stdiff_training_data/original/000846_gaf.png",
+    "missing_gaf": "stdiff_training_data/missing/000846_gaf.png",
+    "original_mtf": "stdiff_training_data/original/000846_mtf.png",
+    "missing_mtf": "stdiff_training_data/missing/000846_mtf.png",
+    "original_rp": "stdiff_training_data/original/000846_rp.png",
+    "missing_rp": "stdiff_training_data/missing/000846_rp.png",
+    "original_spec": "stdiff_training_data/original/000846_spec.png",
+    "missing_spec": "stdiff_training_data/missing/000846_spec.png"
+  }
+}

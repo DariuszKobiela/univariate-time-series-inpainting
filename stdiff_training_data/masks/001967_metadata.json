@@ -1,0 +1,17 @@
+{
+  "series_id": 1967,
+  "pattern_type": "sine",
+  "missing_type": "periodic",
+  "missing_rate": 0.16672303646136255,
+  "length": 520,
+  "file_paths": {
+    "original_gaf": "stdiff_training_data/original/001967_gaf.png",
+    "missing_gaf": "stdiff_training_data/missing/001967_gaf.png",
+    "original_mtf": "stdiff_training_data/original/001967_mtf.png",
+    "missing_mtf": "stdiff_training_data/missing/001967_mtf.png",
+    "original_rp": "stdiff_training_data/original/001967_rp.png",
+    "missing_rp": "stdiff_training_data/missing/001967_rp.png",
+    "original_spec": "stdiff_training_data/original/001967_spec.png",
+    "missing_spec": "stdiff_training_data/missing/001967_spec.png"
+  }
+}
