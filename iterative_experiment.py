@@ -881,6 +881,10 @@ class IterativeExperiment:
                             'MAE': metrics['MAE'],
                             'RMSE': metrics['RMSE']
                         }
+                        
+                        # Add prediction values as val_1, val_2, ..., val_n columns
+                        for i, pred_value in enumerate(predictions, 1):
+                            result_row[f'val_{i}'] = float(pred_value)  # Convert numpy types to Python float
                         results['results_dataframe'].append(result_row)
                         
                         processed_count += 1
@@ -961,6 +965,10 @@ class IterativeExperiment:
                                     'MAE': metrics['MAE'],
                                     'RMSE': metrics['RMSE']
                                 }
+                                
+                                # Add prediction values as val_1, val_2, ..., val_n columns
+                                for i, pred_value in enumerate(predictions, 1):
+                                    result_row[f'val_{i}'] = float(pred_value)  # Convert numpy types to Python float
                                 
                                 # Add to results dataframe list
                                 forecasting_results['results_dataframe'].append(result_row)
@@ -1257,6 +1265,11 @@ class IterativeExperiment:
         
         # Ensure all required columns are present
         required_columns = ['dataset', 'missing_data_type', 'missing_rate', 'iteration_nr', 'fixing_method', 'prediction_method', 'MAPE', 'MAE', 'RMSE']
+        
+        # Add val_1, val_2, ..., val_n columns based on test_size
+        for i in range(1, self.test_size + 1):
+            required_columns.append(f'val_{i}')
+        
         for col in required_columns:
             if col not in df_final.columns:
                 print(f"⚠️ Warning: Column '{col}' not found in results")
