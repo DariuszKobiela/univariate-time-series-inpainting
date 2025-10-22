@@ -1,215 +1,196 @@
-#!/usr/bin/env python3
-"""
-Script to calculate statistical significance of different fixing methods
-compared to the original data for each dataset.
-"""
-
+import os
 import pandas as pd
 import numpy as np
 from scipy import stats
-import matplotlib.pyplot as plt
-import os
 from pathlib import Path
+from tqdm import tqdm
 
-# Configuration
-INPUT_FILE = 'results/quick_experiment/df_final.csv'
-OUTPUT_DIR = 'importance_results'
-OUTPUT_CSV = 'importance.csv'
+# Mapowanie nazw datasetów
+DATASET_MAPPING = {
+    'boiler': 'boiler_outlet_temp_univ.csv',
+    'pump': 'pump_sensor_28_univ.csv',
+    'vibr': 'vibration_sensor_S1.csv',
+    'lake1': 'water_level_sensors_2010_L300.csv',
+    'lake2': 'water_level_sensors_2010_L308.csv',
+    'lake3': 'water_level_sensors_2010_L311.csv'
+}
 
-# Value columns to compare
-VALUE_COLS = [f'val_{i}' for i in range(1, 11)]
-
-
-def read_data():
-    """Read the df_final.csv file."""
-    print(f"Reading data from {INPUT_FILE}...")
-    df = pd.read_csv(INPUT_FILE)
-    print(f"Loaded {len(df)} rows")
-    return df
-
-
-def get_unique_datasets(df):
-    """Get list of unique datasets."""
-    datasets = df['dataset'].unique()
-    print(f"Found {len(datasets)} datasets: {', '.join(datasets)}")
-    return datasets
-
-
-def get_fixing_methods(df, dataset):
-    """Get all fixing methods for a dataset (excluding 'original')."""
-    methods = df[(df['dataset'] == dataset) & (df['fixing_method'] != 'original')]['fixing_method'].unique()
-    return sorted(methods)
-
-
-def get_original_values(df, dataset):
-    """Get the values from the original row for a dataset."""
-    original_rows = df[(df['dataset'] == dataset) & (df['fixing_method'] == 'original')]
-    
-    if len(original_rows) == 0:
-        raise ValueError(f"No original data found for dataset: {dataset}")
-    
-    # Take the first row (they should all be the same)
-    original_row = original_rows.iloc[0]
-    original_values = original_row[VALUE_COLS].values.astype(float)
-    
-    return original_values
-
-
-def get_method_values(df, dataset, fixing_method):
-    """Get all values for a specific fixing method and dataset."""
-    method_rows = df[(df['dataset'] == dataset) & (df['fixing_method'] == fixing_method)]
-    
-    if len(method_rows) == 0:
-        raise ValueError(f"No data found for dataset: {dataset}, method: {fixing_method}")
-    
-    # Collect all values from all rows
-    all_values = []
-    for _, row in method_rows.iterrows():
-        values = row[VALUE_COLS].values.astype(float)
-        all_values.extend(values)
-    
-    return np.array(all_values)
-
-
-def perform_ttest(original_values, method_values):
+def parse_fixed_filename(filename):
     """
-    Perform independent t-test comparing original values to method values.
-    Returns the p-value.
+    Parsuje nazwę pliku z 2_fixed_data.
+    Format: datasetname_missingnessType_missingPercentage_iterationNr_fixingMethod.csv
+    Przykład: boiler_MAR_20p_1_gafsd2all4.csv
     """
-    # original_values: 10 values from one row
-    # method_values: all values from multiple rows (n_rows * 10)
+    parts = filename.replace('.csv', '').split('_')
     
-    # Perform independent samples t-test
-    t_stat, p_value = stats.ttest_ind(original_values, method_values)
+    # Dataset name (może być wieloczęściowy, np. lake1)
+    dataset_name = parts[0]
     
-    return p_value
+    # Missingness type (MAR, MCAR, MNAR)
+    missingness_type = parts[1]
+    
+    # Missing percentage (np. 20p, 5p)
+    missing_percentage = parts[2]
+    
+    # Iteration number
+    iteration_nr = parts[3]
+    
+    # Fixing method (reszta nazwy po ostatnim podkreślniku)
+    fixing_method = '_'.join(parts[4:])
+    
+    return {
+        'dataset_name': dataset_name,
+        'missingness_type': missingness_type,
+        'missing_percentage': missing_percentage,
+        'iteration_nr': iteration_nr,
+        'fixing_method': fixing_method
+    }
 
-
-def calculate_significance(df):
-    """Calculate statistical significance for all methods across all datasets."""
-    datasets = get_unique_datasets(df)
+def get_corresponding_files(parsed_info, base_dir):
+    """
+    Zwraca ścieżki do odpowiadających plików w 0_source_data i 1_missing_data.
+    """
+    dataset_name = parsed_info['dataset_name']
+    missingness_type = parsed_info['missingness_type']
+    missing_percentage = parsed_info['missing_percentage']
+    iteration_nr = parsed_info['iteration_nr']
     
-    results = []
+    # Plik źródłowy
+    source_filename = DATASET_MAPPING.get(dataset_name)
+    if source_filename is None:
+        raise ValueError(f"Unknown dataset name: {dataset_name}")
     
-    for dataset in datasets:
-        print(f"\nProcessing dataset: {dataset}")
-        
-        # Get original values for this dataset
-        original_values = get_original_values(df, dataset)
-        print(f"  Original values shape: {original_values.shape}")
-        
-        # Get all fixing methods for this dataset
-        fixing_methods = get_fixing_methods(df, dataset)
-        print(f"  Found {len(fixing_methods)} fixing methods")
-        
-        for method in fixing_methods:
-            # Get all values for this method
-            method_values = get_method_values(df, dataset, method)
-            
-            # Perform t-test
-            p_value = perform_ttest(original_values, method_values)
-            
-            # Store result
-            results.append({
-                'dataset': dataset,
-                'fixing_method': method,
-                'p_value': p_value,
-                'n_original': len(original_values),
-                'n_method': len(method_values)
-            })
-            
-            print(f"  {method}: p-value = {p_value:.6f}")
+    source_path = os.path.join(base_dir, '0_source_data', source_filename)
     
-    return pd.DataFrame(results)
-
-
-def create_plots(results_df, output_dir):
-    """Create bar plots for each dataset showing p-values."""
-    datasets = results_df['dataset'].unique()
+    # Plik z brakującymi danymi
+    missing_filename = f"{dataset_name}_{missingness_type}_{missing_percentage}_{iteration_nr}.csv"
+    missing_path = os.path.join(base_dir, '1_missing_data', missing_filename)
     
-    for dataset in datasets:
-        print(f"Creating plot for dataset: {dataset}")
-        
-        # Filter data for this dataset
-        dataset_data = results_df[results_df['dataset'] == dataset].copy()
-        
-        # Sort by p-value for better visualization
-        dataset_data = dataset_data.sort_values('p_value')
-        
-        # Create figure
-        plt.figure(figsize=(14, 8))
-        
-        # Create bar plot
-        x_pos = np.arange(len(dataset_data))
-        bars = plt.bar(x_pos, dataset_data['p_value'], alpha=0.7, color='steelblue')
-        
-        # Add horizontal lines for significance levels
-        plt.axhline(y=0.05, color='orange', linestyle='--', linewidth=2, label='α = 0.05')
-        plt.axhline(y=0.01, color='red', linestyle='--', linewidth=2, label='α = 0.01')
-        
-        # Color bars based on significance
-        for i, (idx, row) in enumerate(dataset_data.iterrows()):
-            if row['p_value'] < 0.01:
-                bars[i].set_color('darkgreen')
-            elif row['p_value'] < 0.05:
-                bars[i].set_color('lightgreen')
-        
-        # Customize plot
-        plt.xlabel('Fixing Method', fontsize=12, fontweight='bold')
-        plt.ylabel('p-value', fontsize=12, fontweight='bold')
-        plt.title(f'Statistical Significance of Fixing Methods for Dataset: {dataset}', 
-                  fontsize=14, fontweight='bold')
-        plt.xticks(x_pos, dataset_data['fixing_method'], rotation=45, ha='right')
-        plt.legend(fontsize=10)
-        plt.grid(axis='y', alpha=0.3, linestyle=':')
-        plt.tight_layout()
-        
-        # Save plot
-        plot_path = os.path.join(output_dir, f'{dataset}_significance.png')
-        plt.savefig(plot_path, dpi=300, bbox_inches='tight')
-        plt.close()
-        
-        print(f"  Saved plot to: {plot_path}")
+    return source_path, missing_path
 
+def calculate_ttest_for_file(fixed_path, missing_path, source_path):
+    """
+    Oblicza t-test dla jednego zestawu plików.
+    
+    Dla każdej brakującej wartości w missing_data:
+    - Pobiera oryginalną wartość z source_data
+    - Pobiera naprawioną wartość z fixed_data
+    - Porównuje je za pomocą paired t-test
+    """
+    try:
+        # Wczytaj dane
+        df_source = pd.read_csv(source_path)
+        df_missing = pd.read_csv(missing_path)
+        df_fixed = pd.read_csv(fixed_path)
+        
+        # Znajdź indeksy z brakującymi wartościami
+        # Zakładam, że wartości są w drugiej kolumnie (kolumna 1)
+        value_column = df_missing.columns[1]
+        missing_mask = df_missing[value_column].isna()
+        missing_indices = missing_mask[missing_mask].index
+        
+        if len(missing_indices) == 0:
+            return None, 0, "No missing values found"
+        
+        # Zbierz oryginalne i naprawione wartości dla brakujących pozycji
+        original_values = df_source.loc[missing_indices, value_column].values
+        fixed_values = df_fixed.loc[missing_indices, value_column].values
+        
+        # Usuń NaN jeśli jakieś występują w wartościach naprawionych lub oryginalnych
+        valid_mask = ~(np.isnan(original_values) | np.isnan(fixed_values))
+        original_values = original_values[valid_mask]
+        fixed_values = fixed_values[valid_mask]
+        
+        if len(original_values) < 2:
+            return None, len(missing_indices), "Not enough valid values for t-test"
+        
+        # Wykonaj paired t-test
+        # Testujemy czy fixed_values różnią się od original_values
+        t_statistic, p_value = stats.ttest_rel(original_values, fixed_values)
+        
+        return p_value, len(missing_indices), None
+        
+    except Exception as e:
+        return None, 0, str(e)
 
 def main():
-    """Main function."""
-    print("=" * 70)
-    print("Statistical Significance Analysis")
-    print("=" * 70)
+    # Ścieżki
+    base_dir = '/home/darek/univariate-time-series-inpainting/data'
+    fixed_data_dir = os.path.join(base_dir, '2_fixed_data')
+    output_file = '/home/darek/univariate-time-series-inpainting/importance.csv'
     
-    # Read data
-    df = read_data()
+    # Lista wszystkich plików w 2_fixed_data
+    fixed_files = sorted([f for f in os.listdir(fixed_data_dir) if f.endswith('.csv')])
     
-    # Calculate significance
-    print("\nCalculating statistical significance...")
-    results_df = calculate_significance(df)
+    print(f"Znaleziono {len(fixed_files)} plików do przetworzenia")
     
-    # Create output directory
-    output_dir = OUTPUT_DIR
-    Path(output_dir).mkdir(parents=True, exist_ok=True)
-    print(f"\nCreated output directory: {output_dir}")
+    # Lista wyników
+    results = []
+    errors = []
     
-    # Save results to CSV
-    csv_path = OUTPUT_CSV
-    results_df.to_csv(csv_path, index=False)
-    print(f"Saved results to: {csv_path}")
+    # Przetwarzaj każdy plik
+    for fixed_filename in tqdm(fixed_files, desc="Processing files"):
+        try:
+            # Parsuj nazwę pliku
+            parsed_info = parse_fixed_filename(fixed_filename)
+            
+            # Znajdź odpowiednie pliki
+            source_path, missing_path = get_corresponding_files(parsed_info, base_dir)
+            fixed_path = os.path.join(fixed_data_dir, fixed_filename)
+            
+            # Sprawdź czy pliki istnieją
+            if not os.path.exists(source_path):
+                errors.append(f"Source file not found: {source_path}")
+                continue
+            if not os.path.exists(missing_path):
+                errors.append(f"Missing file not found: {missing_path}")
+                continue
+            
+            # Oblicz t-test
+            p_value, n_missing, error = calculate_ttest_for_file(
+                fixed_path, missing_path, source_path
+            )
+            
+            if error:
+                errors.append(f"{fixed_filename}: {error}")
+                continue
+            
+            # Dodaj wynik
+            results.append({
+                'dataset_name': parsed_info['dataset_name'],
+                'missingness_type': parsed_info['missingness_type'],
+                'missing_percentage': parsed_info['missing_percentage'],
+                'iteration_nr': parsed_info['iteration_nr'],
+                'fixing_method': parsed_info['fixing_method'],
+                'p_value': p_value,
+                't_test_result': p_value,
+                'n_missing_values': n_missing
+            })
+            
+        except Exception as e:
+            errors.append(f"{fixed_filename}: {str(e)}")
     
-    # Create plots
-    print("\nCreating plots...")
-    create_plots(results_df, output_dir)
+    # Zapisz wyniki do CSV
+    df_results = pd.DataFrame(results)
+    df_results.to_csv(output_file, index=False)
     
-    # Print summary
-    print("\n" + "=" * 70)
-    print("Summary")
-    print("=" * 70)
-    print(f"Total comparisons: {len(results_df)}")
-    print(f"Significant at α=0.05: {len(results_df[results_df['p_value'] < 0.05])}")
-    print(f"Significant at α=0.01: {len(results_df[results_df['p_value'] < 0.01])}")
-    print("\nAnalysis complete!")
-    print("=" * 70)
+    print(f"\nPrzetworzono {len(results)} plików pomyślnie")
+    print(f"Wyniki zapisano do: {output_file}")
+    
+    if errors:
+        print(f"\nWystąpiło {len(errors)} błędów:")
+        for error in errors[:10]:  # Pokaż tylko pierwsze 10 błędów
+            print(f"  - {error}")
+        if len(errors) > 10:
+            print(f"  ... i {len(errors) - 10} więcej")
+    
+    # Pokaż statystyki
+    if len(results) > 0:
+        print("\nStatystyki:")
+        print(f"Średnia p-value: {df_results['p_value'].mean():.6f}")
+        print(f"Mediana p-value: {df_results['p_value'].median():.6f}")
+        print(f"Liczba wyników z p < 0.05: {(df_results['p_value'] < 0.05).sum()}")
 
-
-if __name__ == '__main__':
+if __name__ == "__main__":
     main()
 
