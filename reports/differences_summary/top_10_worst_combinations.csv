@@ -1,0 +1,11 @@
+dataset_name,missing_data_type,missing_rate,fixing_method,difference,rank
+pump,MAR,50p,gafsd2all4,1130831221.12237,1
+pump,MCAR,50p,gafsd2all4,1089869051.8384688,2
+pump,MNAR,50p,gafsd2all4,1086711811.6875937,3
+pump,MAR,50p,gafunet,578936892.5659136,4
+pump,MAR,20p,gafsd2all4,544635706.348977,5
+pump,MCAR,50p,gafunet,511097051.854058,6
+pump,MNAR,50p,gafunet,503644851.1315138,7
+pump,MAR,50p,rpsd2all4,486668653.35444874,8
+pump,MCAR,50p,mtfunet,455391184.04017854,9
+pump,MCAR,50p,mtfsd2all4,445710949.55020624,10

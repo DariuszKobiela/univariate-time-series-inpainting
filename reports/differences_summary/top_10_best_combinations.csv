@@ -1,0 +1,11 @@
+dataset_name,missing_data_type,missing_rate,fixing_method,difference,rank
+lake1,MCAR,2p,interpolatelinear,72.11803333333393,1
+lake1,MCAR,2p,interpolateindex,72.11803333333393,2
+lake1,MCAR,2p,interpolateakima,72.76555649065205,3
+lake1,MCAR,2p,interpolatepchip,73.47339608803958,4
+lake1,MCAR,2p,interpolatepolynomial,75.3261754855281,5
+lake1,MCAR,2p,interpolatequadratic,75.3261754855281,6
+lake1,MCAR,2p,interpolatecubic,77.92621285291347,7
+lake1,MCAR,2p,interpolatenearest,92.54909999999995,8
+lake1,MCAR,2p,imputeffill,94.24079999999992,9
+lake1,MNAR,2p,interpolatelinear,97.54055000000079,10

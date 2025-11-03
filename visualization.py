@@ -17,7 +17,7 @@ sns.set_palette("husl")
 
 # Utworzenie figury z 9 wykresami (3x3)
 fig, axes = plt.subplots(3, 3, figsize=(20, 16))
-fig.suptitle('Średnie wartości metryk dla różnych metod uzupełniania danych\n(pogrupowane według typów brakujących danych)', 
+fig.suptitle('Average Metric Values for Different Data Imputation Methods\n(grouped by missing data types)', 
              fontsize=18, fontweight='bold', y=0.98)
 
 # Lista typów brakujących danych
@@ -68,7 +68,7 @@ plt.show()
 
 # Wyświetlenie szczegółowych tabel dla każdego typu brakujących danych
 print("=" * 100)
-print("SZCZEGÓŁOWE WYNIKI DLA KAŻDEGO TYPU BRAKUJĄCYCH DANYCH")
+print("DETAILED RESULTS FOR EACH MISSING DATA TYPE")
 print("=" * 100)
 
 for missing_type in missing_types:
@@ -81,22 +81,22 @@ for missing_type in missing_types:
     print(data_sorted[['fixing_method', 'MAE', 'MAPE', 'RMSE']].to_string(index=False, float_format='%.4f'))
     
     # Najlepsze metody dla danego typu
-    print(f"\nNAJLEPSZE METODY dla {missing_type}:")
+    print(f"\nBEST METHODS for {missing_type}:")
     print(f"  MAE:  {data_subset.loc[data_subset['MAE'].idxmin(), 'fixing_method']} ({data_subset['MAE'].min():.4f})")
     print(f"  MAPE: {data_subset.loc[data_subset['MAPE'].idxmin(), 'fixing_method']} ({data_subset['MAPE'].min():.4f})")
     print(f"  RMSE: {data_subset.loc[data_subset['RMSE'].idxmin(), 'fixing_method']} ({data_subset['RMSE'].min():.4f})")
 
 # Podsumowanie ogólne
 print("\n" + "=" * 100)
-print("PODSUMOWANIE OGÓLNE - NAJLEPSZE METODY ACROSS ALL MISSING TYPES")
+print("OVERALL SUMMARY - BEST METHODS ACROSS ALL MISSING TYPES")
 print("=" * 100)
 
 overall_grouped = df.groupby('fixing_method')[['MAE', 'MAPE', 'RMSE']].mean().reset_index()
 overall_sorted = overall_grouped.sort_values('MAE')
-print("\nŚrednie wartości dla wszystkich typów brakujących danych:")
+print("\nAverage values for all missing data types:")
 print(overall_sorted.to_string(index=False, float_format='%.4f'))
 
-print(f"\nNAJLEPSZE METODY OGÓŁEM:")
+print(f"\nBEST METHODS OVERALL:")
 print(f"  MAE:  {overall_grouped.loc[overall_grouped['MAE'].idxmin(), 'fixing_method']} ({overall_grouped['MAE'].min():.4f})")
 print(f"  MAPE: {overall_grouped.loc[overall_grouped['MAPE'].idxmin(), 'fixing_method']} ({overall_grouped['MAPE'].min():.4f})")
 print(f"  RMSE: {overall_grouped.loc[overall_grouped['RMSE'].idxmin(), 'fixing_method']} ({overall_grouped['RMSE'].min():.4f})")
@@ -119,7 +119,7 @@ def create_interactive_app():
     
     st.set_page_config(page_title="Interactive Time Series Analysis", layout="wide")
     
-    st.title("🔧 Interaktywna Analiza Metod Uzupełniania Danych Czasowych")
+    st.title("🔧 Interactive Analysis of Time Series Imputation Methods")
     st.markdown("---")
     
     # Wczytanie danych
@@ -130,10 +130,10 @@ def create_interactive_app():
     df = load_data()
     
     # SIDEBAR - KONTROLKI
-    st.sidebar.header("⚙️ Ustawienia Wykresu")
+    st.sidebar.header("⚙️ Chart Settings")
     
     # Debug mode
-    debug_mode = st.sidebar.checkbox("🐛 Tryb debug dla różnic bezwzględnych", value=False)
+    debug_mode = st.sidebar.checkbox("🐛 Debug mode for absolute differences", value=False)
     if debug_mode:
         st.session_state['debug_differences'] = True
     else:
@@ -141,20 +141,20 @@ def create_interactive_app():
     
     # Wybór metryki
     metric = st.sidebar.selectbox(
-        "📊 Wybierz metrykę:",
+        "📊 Select metric:",
         options=['MAE', 'MAPE', 'RMSE'],
         index=1
     )
     
     # Wybór agregacji
     aggregation = st.sidebar.selectbox(
-        "🧮 Rodzaj agregacji:",
+        "🧮 Aggregation type:",
         options=['mean', 'median', 'mode'],
         index=0
     )
     
     # FILTRY
-    st.sidebar.markdown("### 🔍 Filtry")
+    st.sidebar.markdown("### 🔍 Filters")
     
     # Filtr missing_rate
     missing_rates = st.sidebar.multiselect(
@@ -171,17 +171,27 @@ def create_interactive_app():
     )
     
     # Filtr dataset
+    # Usuń niechciane datasety z listy opcji
+    all_datasets = df['dataset'].unique()
+    datasets_to_exclude = ['lake1', 'lake2', 'lake3']  # Datasety do usunięcia
+    available_datasets = [d for d in all_datasets if d not in datasets_to_exclude]
+    
     datasets = st.sidebar.multiselect(
         "Dataset:",
-        options=sorted(df['dataset'].unique()),
-        default=sorted(df['dataset'].unique())
+        options=available_datasets,
+        default=available_datasets
     )
     
     # Filtr fixing_method (opcjonalnie ograniczyć)
+    # Usuń niechciane metody z listy opcji
+    all_methods = sorted(df['fixing_method'].unique())
+    methods_to_exclude = ['gaf-unet', 'mtf-unet', 'rp-unet', 'spec-unet']  # Metody do usunięcia
+    available_methods = [m for m in all_methods if m not in methods_to_exclude]
+    
     fixing_methods = st.sidebar.multiselect(
         "Fixing Methods (optional filter):",
-        options=sorted(df['fixing_method'].unique()),
-        default=sorted(df['fixing_method'].unique())
+        options=available_methods,
+        default=available_methods
     )
     
     # Filtr prediction_method (model forecasting)
@@ -202,7 +212,7 @@ def create_interactive_app():
     ]
     
     if filtered_df.empty:
-        st.error("❌ Brak danych dla wybranych filtrów!")
+        st.error("❌ No data for selected filters!")
         return
     
     # AGREGACJA DANYCH
@@ -220,7 +230,7 @@ def create_interactive_app():
     col1, col2 = st.columns([3, 1])
     
     with col1:
-        st.subheader(f"📈 {metric} według Fixing Method ({aggregation})")
+        st.subheader(f"📈 {metric} by Fixing Method ({aggregation})")
         
         # Plotly bar chart
         fig = px.bar(
@@ -252,7 +262,7 @@ def create_interactive_app():
         # =====================================
         # NOWY WYKRES - SUMA RÓŻNIC BEZWZGLĘDNYCH
         # =====================================
-        st.subheader("📊 Suma Różnic Bezwzględnych według Fixing Method")
+        st.subheader("📊 Sum of Absolute Differences by Fixing Method")
         
         # Funkcja do wczytywania i agregowania danych różnic z pliku CSV
         @st.cache_data
@@ -274,13 +284,13 @@ def create_interactive_app():
                         if os.path.exists(path):
                             differences_df = pd.read_csv(path)
                             if st.session_state.get('debug_differences', False):
-                                st.write(f"🔍 Debug - wczytano dane z: {path}")
+                                st.write(f"🔍 Debug - data loaded from: {path}")
                             break
                     except:
                         continue
                 
                 if differences_df is None:
-                    raise FileNotFoundError("Nie znaleziono pliku df_differences.csv w żadnej z ścieżek")
+                    raise FileNotFoundError("File df_differences.csv not found in any of the paths")
                 
                 # Debug info
                 if st.session_state.get('debug_differences', False):
@@ -335,12 +345,12 @@ def create_interactive_app():
                 if st.session_state.get('debug_differences', False):
                     st.write(f"🔍 Debug - filtered_differences shape: {filtered_differences.shape}")
                     if filtered_differences.empty:
-                        st.write("🔍 Debug - dostępne dataset_name w differences:", differences_df['dataset_name'].unique())
-                        st.write("🔍 Debug - szukane datasety:", main_combinations['dataset'].unique())
-                        st.write("🔍 Debug - dostępne missing_rate w differences:", differences_df['missing_rate'].unique())
-                        st.write("🔍 Debug - szukane missing_rate:", missing_rate_converted)
-                        st.write("🔍 Debug - dostępne fixing_method w differences:", differences_df['fixing_method'].unique()[:10])
-                        st.write("🔍 Debug - szukane fixing_method:", list(fixing_methods_to_search))
+                        st.write("🔍 Debug - available dataset_name in differences:", differences_df['dataset_name'].unique())
+                        st.write("🔍 Debug - searched datasets:", main_combinations['dataset'].unique())
+                        st.write("🔍 Debug - available missing_rate in differences:", differences_df['missing_rate'].unique())
+                        st.write("🔍 Debug - searched missing_rate:", missing_rate_converted)
+                        st.write("🔍 Debug - available fixing_method in differences:", differences_df['fixing_method'].unique()[:10])
+                        st.write("🔍 Debug - searched fixing_method:", list(fixing_methods_to_search))
                 
                 if filtered_differences.empty:
                     return pd.DataFrame()
@@ -351,7 +361,7 @@ def create_interactive_app():
                 return aggregated.reset_index()
                 
             except Exception as e:
-                st.error(f"Błąd wczytywania pliku df_differences.csv: {str(e)}")
+                st.error(f"Error loading df_differences.csv file: {str(e)}")
                 import traceback
                 st.error(f"Stack trace: {traceback.format_exc()}")
                 return pd.DataFrame()
@@ -368,16 +378,9 @@ def create_interactive_app():
                 abs_diff_sorted,
                 x='fixing_method',
                 y='difference',
-                title='Suma Różnic Bezwzględnych (Filtered Data)',
+                title='Sum of Absolute Differences',
                 color='difference',
-                color_continuous_scale='plasma',
-                text='difference'
-            )
-            
-            # Formatowanie wykresu
-            fig_abs.update_traces(
-                texttemplate='%{text:.0f}',
-                textposition='outside'
+                color_continuous_scale='plasma'
             )
             
             fig_abs.update_layout(
@@ -385,27 +388,27 @@ def create_interactive_app():
                 height=600,
                 showlegend=False,
                 xaxis_title="Fixing Method",
-                yaxis_title="Suma Różnic Bezwzględnych"
+                yaxis_title="Sum of Absolute Differences"
             )
             
             st.plotly_chart(fig_abs, use_container_width=True)
             
         else:
-            st.warning("⚠️ Nie można obliczyć różnic bezwzględnych dla wybranych filtrów - sprawdź dostępność plików danych.")
+            st.warning("⚠️ Cannot calculate absolute differences for selected filters - check data files availability.")
     
     with col2:
-        st.subheader("📊 Statystyki")
+        st.subheader("📊 Statistics")
         best_method = aggregated_data.loc[aggregated_data[metric].idxmin(), 'fixing_method']
         best_value = aggregated_data[metric].min()
         worst_method = aggregated_data.loc[aggregated_data[metric].idxmax(), 'fixing_method']
         worst_value = aggregated_data[metric].max()
         
-        st.metric("🥇 Najlepsza metoda", best_method, f"{best_value:.4f}")
-        st.metric("🥉 Najgorsza metoda", worst_method, f"{worst_value:.4f}")
+        st.metric("🥇 Best method", best_method, f"{best_value:.4f}")
+        st.metric("🥉 Worst method", worst_method, f"{worst_value:.4f}")
         st.metric("📈 Improvement", "", f"{((worst_value-best_value)/worst_value*100):.1f}%")
         
         # Statystyki filtrów
-        st.markdown("### 🔢 Aktywne filtry:")
+        st.markdown("### 🔢 Active filters:")
         st.write(f"• Missing rates: {missing_rates}")
         st.write(f"• Data types: {missing_types}")  
         st.write(f"• Datasets: {datasets}")
@@ -413,7 +416,7 @@ def create_interactive_app():
         st.write(f"• Records: {len(filtered_df)}")
     
     # TABELA SZCZEGÓŁÓW
-    st.subheader("📋 Szczegółowe Wyniki")
+    st.subheader("📋 Detailed Results")
     
     # Formatowanie tabeli
     display_df = aggregated_data.copy()
@@ -427,9 +430,235 @@ def create_interactive_app():
         hide_index=True
     )
     
+    # =====================================
+    # COMPREHENSIVE SUMMARY TABLE - ABSOLUTE DIFFERENCES
+    # =====================================
+    st.markdown("---")
+    st.subheader("📊 Comprehensive Summary - Absolute Differences")
+    
+    # Funkcja do ładowania comprehensive summary
+    @st.cache_data
+    def load_comprehensive_summary(filtered=True):
+        """Ładuje comprehensive summary z pliku CSV"""
+        try:
+            filename = 'comprehensive_summary_filtered.csv' if filtered else 'comprehensive_summary.csv'
+            possible_paths = [
+                f'reports/differences_summary/{filename}',
+                f'./reports/differences_summary/{filename}',
+                f'/home/darek/univariate-time-series-inpainting/reports/differences_summary/{filename}'
+            ]
+            
+            for path in possible_paths:
+                if os.path.exists(path):
+                    return pd.read_csv(path)
+            
+            return None
+        except Exception as e:
+            st.error(f"Error loading comprehensive summary: {str(e)}")
+            return None
+    
+    # Opcja wyboru wersji tabeli
+    use_filtered = st.checkbox(
+        "📌 Use filtered version (excludes lake1/lake2/lake3 and gaf/mtf/rp/spec-unet)", 
+        value=True,
+        key="use_filtered_comprehensive"
+    )
+    
+    # Wczytaj comprehensive summary
+    comprehensive_df = load_comprehensive_summary(filtered=use_filtered)
+    
+    if comprehensive_df is not None:
+        version_text = "filtered (no lake datasets, no unet methods)" if use_filtered else "complete"
+        st.markdown(f"**Complete table with all combinations ({version_text}):**")
+        st.markdown(f"*Dataset × Missingness Type × Missingness Rate × Fixing Method*")
+        
+        # Dodaj filtry dla tabeli
+        col1, col2, col3 = st.columns(3)
+        
+        with col1:
+            filter_datasets = st.multiselect(
+                "Filter by Dataset:",
+                options=sorted(comprehensive_df['Dataset'].unique()),
+                default=sorted(comprehensive_df['Dataset'].unique()),
+                key="comp_dataset_filter"
+            )
+        
+        with col2:
+            filter_miss_types = st.multiselect(
+                "Filter by Missingness Type:",
+                options=sorted(comprehensive_df['Missingness_Type'].unique()),
+                default=sorted(comprehensive_df['Missingness_Type'].unique()),
+                key="comp_misstype_filter"
+            )
+        
+        with col3:
+            filter_miss_rates = st.multiselect(
+                "Filter by Missingness Rate:",
+                options=sorted(comprehensive_df['Missingness_Rate'].unique()),
+                default=sorted(comprehensive_df['Missingness_Rate'].unique()),
+                key="comp_missrate_filter"
+            )
+        
+        # Filtruj dane
+        filtered_comprehensive = comprehensive_df[
+            (comprehensive_df['Dataset'].isin(filter_datasets)) &
+            (comprehensive_df['Missingness_Type'].isin(filter_miss_types)) &
+            (comprehensive_df['Missingness_Rate'].isin(filter_miss_rates))
+        ]
+        
+        # Statystyki
+        col1, col2, col3, col4 = st.columns(4)
+        with col1:
+            st.metric("Total Rows", len(filtered_comprehensive))
+        with col2:
+            st.metric("Unique Methods", filtered_comprehensive['Fixing_Method'].nunique())
+        with col3:
+            best_combo = filtered_comprehensive.nsmallest(1, 'Sum_of_Absolute_Differences')
+            if not best_combo.empty:
+                st.metric("Best Method", best_combo.iloc[0]['Fixing_Method'])
+        with col4:
+            if not filtered_comprehensive.empty:
+                st.metric("Best Score", f"{filtered_comprehensive['Sum_of_Absolute_Differences'].min():.2f}")
+        
+        # Wyświetl tabelę
+        st.dataframe(
+            filtered_comprehensive,
+            use_container_width=True,
+            hide_index=True,
+            height=400
+        )
+        
+        # Download button
+        csv = filtered_comprehensive.to_csv(index=False)
+        st.download_button(
+            label="📥 Download filtered table as CSV",
+            data=csv,
+            file_name="filtered_comprehensive_summary.csv",
+            mime="text/csv"
+        )
+        
+    else:
+        st.warning("⚠️ Comprehensive summary file not found. Run generate_differences_report.py first.")
+    
+    # =====================================
+    # MACIERZ NAJLEPSZYCH METOD - ABSOLUTE DIFFERENCES
+    # =====================================
+    st.markdown("---")
+    st.subheader("🏆 Best Methods Matrix - Absolute Differences")
+    
+    # Funkcja do generowania macierzy najlepszych metod
+    @st.cache_data
+    def generate_best_methods_matrix(filtered_main_df):
+        """Generuje macierz pokazującą najlepsze metody dla różnych kombinacji"""
+        try:
+            # Wczytaj dane różnic
+            possible_paths = [
+                'df_differences.csv',
+                './df_differences.csv', 
+                '../df_differences.csv',
+                '/home/darek/univariate-time-series-inpainting/df_differences.csv'
+            ]
+            
+            differences_df = None
+            for path in possible_paths:
+                try:
+                    if os.path.exists(path):
+                        differences_df = pd.read_csv(path)
+                        break
+                except:
+                    continue
+            
+            if differences_df is None:
+                return None
+            
+            # Konwersja formatów (podobnie jak wcześniej)
+            main_combinations = filtered_main_df[['dataset', 'missing_data_type', 'missing_rate']].drop_duplicates()
+            missing_rate_converted = [f"{int(rate)}p" for rate in main_combinations['missing_rate'].unique()]
+            
+            # Filtruj dane różnic według aktualnych filtrów
+            filtered_differences = differences_df[
+                (differences_df['dataset_name'].isin(main_combinations['dataset'].unique())) &
+                (differences_df['missing_data_type'].isin(main_combinations['missing_data_type'].unique())) &
+                (differences_df['missing_rate'].isin(missing_rate_converted))
+            ]
+            
+            if filtered_differences.empty:
+                return None
+            
+            # Generuj macierz najlepszych metod dla dataset x missing_type
+            matrix_data = []
+            
+            for dataset in filtered_differences['dataset_name'].unique():
+                row_data = {'Dataset': dataset}
+                
+                for missing_type in sorted(filtered_differences['missing_data_type'].unique()):
+                    subset = filtered_differences[
+                        (filtered_differences['dataset_name'] == dataset) & 
+                        (filtered_differences['missing_data_type'] == missing_type)
+                    ]
+                    
+                    if not subset.empty:
+                        method_totals = subset.groupby('fixing_method')['difference'].sum()
+                        best_method = method_totals.idxmin()
+                        best_value = method_totals.min()
+                        
+                        row_data[missing_type] = f"{best_method}\n({best_value:.0f})"
+                    else:
+                        row_data[missing_type] = "N/A"
+                
+                matrix_data.append(row_data)
+            
+            return pd.DataFrame(matrix_data)
+            
+        except Exception as e:
+            st.error(f"Error generating best methods matrix: {str(e)}")
+            return None
+    
+    # Generuj macierz
+    best_methods_df = generate_best_methods_matrix(filtered_df)
+    
+    if best_methods_df is not None and not best_methods_df.empty:
+        st.markdown("**Best method (and total difference) for each Dataset × Missing Type combination:**")
+        st.dataframe(
+            best_methods_df,
+            use_container_width=True,
+            hide_index=True
+        )
+        
+        # Dodatkowa tabela - ranking metod według częstości wygranych
+        st.markdown("---")
+        st.markdown("**🥇 Methods Ranking by Number of Wins:**")
+        
+        # Policz ile razy każda metoda była najlepsza
+        wins_count = {}
+        for col in best_methods_df.columns:
+            if col != 'Dataset':
+                for val in best_methods_df[col]:
+                    if val != "N/A" and isinstance(val, str):
+                        method = val.split('\n')[0]  # Wyciągnij nazwę metody
+                        wins_count[method] = wins_count.get(method, 0) + 1
+        
+        if wins_count:
+            wins_df = pd.DataFrame(list(wins_count.items()), columns=['Method', 'Wins'])
+            wins_df = wins_df.sort_values('Wins', ascending=False)
+            wins_df['Rank'] = range(1, len(wins_df) + 1)
+            wins_df = wins_df[['Rank', 'Method', 'Wins']]
+            
+            col1, col2 = st.columns([2, 1])
+            
+            with col1:
+                st.dataframe(wins_df, use_container_width=True, hide_index=True)
+            
+            with col2:
+                st.metric("🏆 Most Wins", wins_df.iloc[0]['Method'], f"{int(wins_df.iloc[0]['Wins'])} wins")
+                if len(wins_df) > 1:
+                    st.metric("🥈 Second Place", wins_df.iloc[1]['Method'], f"{int(wins_df.iloc[1]['Wins'])} wins")
+    else:
+        st.warning("⚠️ Cannot generate best methods matrix - check data availability.")
+    
     # PORÓWNANIE METRYK
-    if st.checkbox("📊 Pokaż porównanie wszystkich metryk"):
-        st.subheader("🔄 Porównanie MAE, MAPE, RMSE")
+    if st.checkbox("📊 Show comparison of all metrics"):
+        st.subheader("🔄 Comparison of MAE, MAPE, RMSE")
         
         # Agregacja dla wszystkich metryk
         all_metrics_data = filtered_df.groupby('fixing_method')[['MAE', 'MAPE', 'RMSE']].agg(aggregation).reset_index()
@@ -445,7 +674,7 @@ def create_interactive_app():
             x=metrics_normalized['fixing_method'],
             y=['MAE (norm)', 'MAPE (norm)', 'RMSE (norm)'],
             color_continuous_scale='RdYlBu_r',
-            title="Znormalizowane Metryki (ciemniejsze = gorsze)"
+            title="Normalized Metrics (darker = worse)"
         )
         
         fig_heatmap.update_layout(height=400)
@@ -455,7 +684,7 @@ def create_interactive_app():
     # SEKCJA WYŚWIETLANIA OBRAZÓW
     # =====================================
     st.markdown("---")
-    st.subheader("🖼️ Porównanie Wizualizacji Obrazowych")
+    st.subheader("🖼️ Image Visualization Comparison")
     
     # KONTROLKI OBRAZÓW - w głównej części strony
     col1, col2, col3, col4 = st.columns(4)
@@ -470,7 +699,7 @@ def create_interactive_app():
     
     with col2:
         image_degradation = st.selectbox(
-            "Metoda Degradacji:",
+            "Degradation Method:",
             options=['MAR', 'MCAR', 'MNAR'],
             index=1,  # MCAR jako domyślny
             key="image_degradation"
@@ -478,7 +707,7 @@ def create_interactive_app():
     
     with col3:
         image_percentage = st.selectbox(
-            "Procent Degradacji:",
+            "Degradation Percentage:",
             options=['2p', '5p', '20p'],
             index=0,
             key="image_percentage"
@@ -486,7 +715,7 @@ def create_interactive_app():
     
     with col4:
         image_iteration = st.selectbox(
-            "Iteracja:",
+            "Iteration:",
             options=[1, 2, 3],
             index=0,
             key="image_iteration"
@@ -518,20 +747,20 @@ def create_interactive_app():
                 image = Image.open(image_path)
                 st.image(image, caption=caption, width=width)
             except Exception as e:
-                st.error(f"Błąd wczytywania: {caption}")
+                st.error(f"Loading error: {caption}")
         else:
-            st.warning(f"Brak pliku: {caption}")
+            st.warning(f"File not found: {caption}")
     
     # Budowanie ścieżek dla wybranych parametrów
     image_paths = build_image_paths(image_dataset, image_degradation, image_percentage, image_iteration)
     
     # Tworzenie tabeli obrazów 5x4 (5 kolumn: typ + 4 obrazy, 4 wiersze: gaf/spec/rp/mtf)
-    st.markdown("### Tabela Porównawcza Obrazów")
+    st.markdown("### Image Comparison Table")
     
     # Nagłówki kolumn
     col_header1, col_header2, col_header3, col_header4, col_header5 = st.columns([1, 2, 2, 2, 2])
     with col_header1:
-        st.markdown("**Typ**")
+        st.markdown("**Type**")
     with col_header2:
         st.markdown("**Original**")
     with col_header3:
@@ -584,14 +813,14 @@ def create_interactive_app():
     # SEKCJA WYKRESU LINIOWEGO PORÓWNAWCZEGO
     # =====================================
     st.markdown("---")
-    st.subheader("📈 Wykres Porównawczy Szeregów Czasowych")
+    st.subheader("📈 Time Series Comparison Chart")
     
     # Filtr metody uzupełniania dla trzeciej linii
     col1, col2, col3, col4 = st.columns([1, 1, 1, 1])
     
     with col1:
         fixing_method = st.selectbox(
-            "Metoda uzupełniania:",
+            "Fixing method:",
             options=['gaf-unet', 'mtf-unet', 'rp-unet', 'spec-unet'],
             index=0,
             key="chart_fixing_method"
@@ -629,7 +858,7 @@ def create_interactive_app():
             else:
                 return None
         except Exception as e:
-            st.error(f"Błąd wczytywania pliku {file_path}: {str(e)}")
+            st.error(f"Error loading file {file_path}: {str(e)}")
             return None
     
     # Budowanie ścieżek do plików danych
@@ -686,7 +915,7 @@ def create_interactive_app():
             x=original_trimmed['timestamp'],
             y=original_trimmed['value'],
             mode='lines',
-            name='Oryginalne dane',
+            name='Original data',
             line=dict(color='blue', width=1.5)
         ))
         
@@ -695,7 +924,7 @@ def create_interactive_app():
             x=missing_trimmed['timestamp'],
             y=missing_trimmed['value'],
             mode='lines',
-            name='Dane z brakami',
+            name='Data with missing values',
             line=dict(color='red', width=1.5)
         ))
         
@@ -704,15 +933,15 @@ def create_interactive_app():
             x=fixed_trimmed['timestamp'],
             y=fixed_trimmed['value'],
             mode='lines',
-            name=f'Uzupełnione ({fixing_method})',
+            name=f'Imputed ({fixing_method})',
             line=dict(color='green', width=1.5)
         ))
         
         # Konfiguracja wykresu
         fig.update_layout(
-            title=f'Porównanie Szeregów Czasowych - {image_dataset.upper()} ({image_degradation}, {image_percentage}, iter: {image_iteration})',
-            xaxis_title='Czas',
-            yaxis_title='Wartość',
+            title=f'Time Series Comparison - {image_dataset.upper()} ({image_degradation}, {image_percentage}, iter: {image_iteration})',
+            xaxis_title='Time',
+            yaxis_title='Value',
             height=500,
             hovermode='x unified',
             legend=dict(
@@ -728,19 +957,19 @@ def create_interactive_app():
         st.plotly_chart(fig, use_container_width=True)
         
         # Wyświetlenie informacji o plikach
-        with st.expander("📁 Informacje o plikach danych"):
-            st.write("**Ścieżki do plików:**")
+        with st.expander("📁 Data file information"):
+            st.write("**File paths:**")
             for data_type, path in data_paths.items():
                 status = "✅" if os.path.exists(path) else "❌"
                 st.write(f"• {data_type.title()}: `{path}` {status}")
         
         # Statystyki porównawcze
-        with st.expander("📊 Statystyki porównawcze"):
+        with st.expander("📊 Comparison statistics"):
             col1, col2, col3 = st.columns(3)
             
             with col1:
                 st.metric(
-                    "Średnia oryginalna",
+                    "Original mean",
                     f"{original_trimmed['value'].mean():.3f}",
                     f"σ: {original_trimmed['value'].std():.3f}"
                 )
@@ -750,34 +979,34 @@ def create_interactive_app():
                 missing_count = missing_trimmed['value'].isna().sum()
                 missing_percent = (missing_count / len(missing_trimmed)) * 100
                 st.metric(
-                    "Dane z brakami",
+                    "Data with missing values",
                     f"{missing_trimmed['value'].mean():.3f}",
-                    f"Brakuje: {missing_percent:.1f}%"
+                    f"Missing: {missing_percent:.1f}%"
                 )
             
             with col3:
                 # Oblicz MAE między oryginalnymi a uzupełnionymi
                 mae = np.mean(np.abs(original_trimmed['value'] - fixed_trimmed['value']))
                 st.metric(
-                    f"Uzupełnione ({fixing_method})",
+                    f"Imputed ({fixing_method})",
                     f"{fixed_trimmed['value'].mean():.3f}",
                     f"MAE: {mae:.3f}"
                 )
     
     else:
         # Komunikat o błędzie wczytywania danych
-        st.error("❌ Nie można wczytać wszystkich wymaganych plików danych!")
+        st.error("❌ Cannot load all required data files!")
         
-        with st.expander("🔍 Sprawdź dostępność plików"):
+        with st.expander("🔍 Check file availability"):
             for data_type, path in data_paths.items():
-                status = "✅ Istnieje" if os.path.exists(path) else "❌ Brak"
+                status = "✅ Exists" if os.path.exists(path) else "❌ Missing"
                 st.write(f"• **{data_type.title()}**: `{path}` - {status}")
     
     # =====================================
     # SEKCJA HISTOGRAMU MAPE
     # =====================================
     st.markdown("---")
-    st.subheader("📊 Histogram Rozkładu MAPE")
+    st.subheader("📊 MAPE Distribution Histogram")
     
     # Wczytanie danych df_final
     @st.cache_data
@@ -786,7 +1015,7 @@ def create_interactive_app():
         try:
             return pd.read_csv('results/quick_experiment/df_final.csv')
         except Exception as e:
-            st.error(f"Błąd wczytywania df_final.csv: {str(e)}")
+            st.error(f"Error loading df_final.csv: {str(e)}")
             return None
     
     df_final = load_final_data()
@@ -816,7 +1045,7 @@ def create_interactive_app():
         with col3:
             # Wielkość bina
             bin_size = st.slider(
-                "Rozmiar bina:",
+                "Bin size:",
                 min_value=0.001,
                 max_value=1.0,
                 value=0.01,
@@ -873,9 +1102,9 @@ def create_interactive_app():
                 
                 # Konfiguracja wykresu
                 fig_hist.update_layout(
-                    title=f'Rozkład MAPE dla Dataset: {hist_dataset} (bin size: {bin_size})',
+                    title=f'MAPE Distribution for Dataset: {hist_dataset} (bin size: {bin_size})',
                     xaxis_title='MAPE',
-                    yaxis_title='Liczba wystąpień',
+                    yaxis_title='Count',
                     height=500,
                     barmode='overlay',  # Histogramy nachodzące na siebie
                     hovermode='x unified',
@@ -892,25 +1121,25 @@ def create_interactive_app():
                 st.plotly_chart(fig_hist, use_container_width=True)
                 
                 # Statystyki szczegółowe
-                with st.expander("📈 Statystyki MAPE dla wybranych metod"):
+                with st.expander("📈 MAPE statistics for selected methods"):
                     stats_df = filtered_final_df.groupby('fixing_method')['MAPE'].agg([
                         'count', 'mean', 'median', 'std', 'min', 'max'
                     ]).round(4)
-                    stats_df.columns = ['Liczba', 'Średnia', 'Mediana', 'Odch. std.', 'Min', 'Max']
+                    stats_df.columns = ['Count', 'Mean', 'Median', 'Std. dev.', 'Min', 'Max']
                     st.dataframe(stats_df, use_container_width=True)
                 
                 # Informacje o filtracji
-                st.info(f"📊 Wyświetlono {len(filtered_final_df)} rekordów dla dataset: **{hist_dataset}** "
-                       f"i {len(hist_fixing_methods)} wybranych metod.")
+                st.info(f"📊 Displayed {len(filtered_final_df)} records for dataset: **{hist_dataset}** "
+                       f"and {len(hist_fixing_methods)} selected methods.")
             
             else:
-                st.warning("⚠️ Brak danych dla wybranych filtrów!")
+                st.warning("⚠️ No data for selected filters!")
         
         else:
-            st.warning("⚠️ Wybierz przynajmniej jedną metodę fixing_method!")
+            st.warning("⚠️ Select at least one fixing_method!")
     
     else:
-        st.error("❌ Nie można wczytać pliku df_final.csv!")
+        st.error("❌ Cannot load df_final.csv file!")
 
 # Uruchamianie interaktywnej części tylko gdy jest uruchamiana jako Streamlit app
 if __name__ == "__main__":
@@ -921,5 +1150,5 @@ if __name__ == "__main__":
         if hasattr(st, 'get_option'):
             create_interactive_app()
     except ImportError:
-        print("Streamlit nie jest zainstalowany. Zainstaluj przez: pip install streamlit plotly")
-        print("Uruchom interaktywną aplikację przez: streamlit run visualization.py")
+        print("Streamlit is not installed. Install via: pip install streamlit plotly")
+        print("Run interactive application via: streamlit run visualization.py")
