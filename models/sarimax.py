@@ -6,10 +6,10 @@ def train_sarimax(train_series: pd.Series, horizon: int, random_state: int = Non
     Trains a SARIMAX model and returns a forecast.
     Note: random_state is ignored as SARIMAX is deterministic.
     """
-    # 1. Create a modern "dummy" DatetimeIndex with a monthly frequency
+    # 1. Create a modern "dummy" DatetimeIndex with an hourly frequency
     #    to satisfy the model and avoid out-of-bounds errors.
     series = train_series.copy()
-    series.index = pd.date_range(start='2000-01-01', periods=len(series), freq='M')
+    series.index = pd.date_range(start='2000-01-01', periods=len(series), freq='H')
 
     # 2. Train the model
     model = SARIMAX(

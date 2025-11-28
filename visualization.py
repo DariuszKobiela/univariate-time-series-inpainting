@@ -233,11 +233,29 @@ def create_interactive_app():
         st.subheader(f"📈 {metric} by Fixing Method ({aggregation})")
         
         # Plotly bar chart
+        # Formatowanie missing_rates do wyświetlenia w tytule
+        if len(missing_rates) == len(sorted(df['missing_rate'].unique())):
+            missing_rate_str = "all"
+        else:
+            missing_rate_str = ", ".join([f"{int(r)}%" for r in sorted(missing_rates)])
+        
+        # Formatowanie missing_types do wyświetlenia w tytule
+        if len(missing_types) == len(sorted(df['missing_data_type'].unique())):
+            missing_type_str = "all"
+        else:
+            missing_type_str = ", ".join(sorted(missing_types))
+        
+        # Formatowanie datasets do wyświetlenia w tytule
+        if len(datasets) == len(available_datasets):
+            dataset_str = "all"
+        else:
+            dataset_str = ", ".join(sorted(datasets))
+        
         fig = px.bar(
             aggregated_data,
             x='fixing_method',
             y=metric,
-            title=f'{metric} - {aggregation.title()} (Filtered Data)',
+            title=f'{aggregation} {metric} for each fixing method - missing rate: {missing_rate_str}, missing type: {missing_type_str}, dataset: {dataset_str}',
             color=metric,
             color_continuous_scale='viridis',
             text=metric

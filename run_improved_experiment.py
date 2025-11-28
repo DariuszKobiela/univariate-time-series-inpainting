@@ -43,16 +43,17 @@ def run_quick_experiment():
     experiment = IterativeExperiment(
         data_paths=["data/0_source_data/boiler_outlet_temp_univ.csv",
                    "data/0_source_data/pump_sensor_28_univ.csv",
-                   "data/0_source_data/vibration_sensor_S1.csv",
-                   "data/0_source_data/water_level_sensors_2010_L300.csv",
-                   "data/0_source_data/water_level_sensors_2010_L308.csv",
-                   "data/0_source_data/water_level_sensors_2010_L311.csv"],
+                   "data/0_source_data/vibration_sensor_S1.csv"],
+                #    "data/0_source_data/water_level_sensors_2010_L300.csv",
+                #    "data/0_source_data/water_level_sensors_2010_L308.csv",
+                #    "data/0_source_data/water_level_sensors_2010_L311.csv"],
         n_iterations=10,
-        inpainting_models=["gaf-unet", "mtf-unet","rp-unet","spec-unet","mtf-sd2-all4", "rp-sd2-all4", "spec-sd2-all4", "gaf-sd2-all4"],
-        forecasting_models=["XGBoost"],#, "HoltWinters"],#, "SARIMAX"],
+        # inpainting_models=["gaf-unet", "mtf-unet","rp-unet","spec-unet","mtf-sd2-all4", "rp-sd2-all4", "spec-sd2-all4", "gaf-sd2-all4"],
+        inpainting_models=["mtf-sd2-all4", "rp-sd2-all4", "spec-sd2-all4", "gaf-sd2-all4"],
+        forecasting_models=["XGBoost", "HoltWinters", "SARIMAX", "Prophet"],
         missingness_types=["MCAR", "MAR", "MNAR"],
         test_size=10,
-        missingness_rates=[0.02, 0.05, 0.20, 0.50],  # 2%, 5%, 10%
+        missingness_rates=[0.02, 0.05, 0.20, 0.50],  # 2%, 5%, 20%, 50%
         output_dir="results/quick_experiment"
     )
     
