@@ -1,4 +1,0 @@
-metric,total_comparisons,significant_original_05,significant_bonferroni_05,significant_original_01,significant_bonferroni_01,percent_original_05,percent_bonferroni_05,percent_original_01,percent_bonferroni_01
-MAE,13,0,0,0,0,0.0,0.0,0.0,0.0
-RMSE,13,13,0,0,0,100.0,0.0,0.0,0.0
-MAPE,13,0,0,0,0,0.0,0.0,0.0,0.0

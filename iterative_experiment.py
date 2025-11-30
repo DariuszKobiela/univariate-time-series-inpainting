@@ -7,6 +7,18 @@ import numpy as np
 import matplotlib.pyplot as plt
 import seaborn as sns
 from sklearn.metrics import mean_absolute_error, mean_squared_error, mean_absolute_percentage_error
+
+def symmetric_mean_absolute_percentage_error(y_true, y_pred):
+    """Calculate Symmetric Mean Absolute Percentage Error (SMAPE)"""
+    # Convert to numpy arrays if needed
+    y_true = np.asarray(y_true).flatten()
+    y_pred = np.asarray(y_pred).flatten()
+    
+    epsilon = np.finfo(np.float64).eps
+    denominator = (np.abs(y_true) + np.abs(y_pred)) / 2.0
+    # Add epsilon to avoid division by zero
+    smape = np.mean(np.abs(y_true - y_pred) / np.maximum(denominator, epsilon))
+    return smape
 from scipy.stats import ttest_ind, f_oneway
 import statsmodels.api as sm
 from statsmodels.stats.anova import anova_lm, AnovaRM
@@ -53,10 +65,10 @@ class IterativeExperiment:
             self.data_paths = [
                 "data/0_source_data/boiler_outlet_temp_univ.csv",
                 "data/0_source_data/pump_sensor_28_univ.csv", 
-                "data/0_source_data/vibration_sensor_S1.csv",
-                "data/0_source_data/water_level_sensors_2010_L300.csv",
-                "data/0_source_data/water_level_sensors_2010_L308.csv",
-                "data/0_source_data/water_level_sensors_2010_L311.csv"
+                "data/0_source_data/vibration_sensor_S1.csv"
+                # "data/0_source_data/water_level_sensors_2010_L300.csv",
+                # "data/0_source_data/water_level_sensors_2010_L308.csv",
+                # "data/0_source_data/water_level_sensors_2010_L311.csv"
             ]
         else:
             self.data_paths = data_paths
@@ -78,9 +90,9 @@ class IterativeExperiment:
             "impute_mean", "impute_median", "impute_mode",
             "impute_ffill", "impute_bfill",
             "interpolate_nearest", "interpolate_linear", "interpolate_index",
-            "interpolate_quadratic", "interpolate_cubic", "interpolate_polynomial", "interpolate_pchip", "interpolate_akima"
-            #"knn", "sarimax"
-        ] #,"interpolate_spline"
+            "interpolate_quadratic", "interpolate_cubic", "interpolate_polynomial", "interpolate_pchip", "interpolate_akima", "interpolate_spline",
+            "knn", "sarimax"
+        ] 
         
         # Create output directories
         os.makedirs(self.output_dir, exist_ok=True)
@@ -202,7 +214,7 @@ class IterativeExperiment:
         self.test_data = []
         self.original_dataframes = []  # NEW: Store original DataFrames with timestamps
         
-        dataset_names = ["boiler", "pump", "vibr", "lake1", "lake2", "lake3"]
+        dataset_names = ["boiler", "pump", "vibr"] #"lake1", "lake2", "lake3"
         
         for i, data_path in enumerate(self.data_paths):
             try:
@@ -488,15 +500,17 @@ class IterativeExperiment:
             mae = mean_absolute_error(true_values, predicted_values)
             rmse = np.sqrt(mean_squared_error(true_values, predicted_values))
             mape = mean_absolute_percentage_error(true_values, predicted_values) * 100
+            smape = symmetric_mean_absolute_percentage_error(true_values, predicted_values) * 100
             
             return {
+                'MAPE': mape,
+                'SMAPE': smape,
                 'MAE': mae,
-                'RMSE': rmse,
-                'MAPE': mape
+                'RMSE': rmse
             }
         except Exception as e:
             print(f"Warning: Metric calculation failed: {e}")
-            return {'MAE': np.inf, 'RMSE': np.inf, 'MAPE': np.inf}
+            return {'MAPE': np.inf, 'SMAPE': np.inf, 'MAE': np.inf, 'RMSE': np.inf}
     
     def generate_and_save_degraded_datasets(self):
         """Generate and save all degraded datasets for all iterations"""
@@ -508,7 +522,7 @@ class IterativeExperiment:
             print(f"\n🔄 Creating degraded datasets for iteration {iteration + 1}/{self.n_iterations}...")
             
             for dataset_idx in range(len(self.train_data)):
-                dataset_name = ["boiler", "pump", "vibr", "lake1", "lake2", "lake3"][dataset_idx]
+                dataset_name = ["boiler", "pump", "vibr"][dataset_idx]
                 print(f"  Processing dataset {dataset_idx + 1} ({dataset_name})...")
                 
                 # Get original DataFrame with timestamps (only training part)
@@ -558,7 +572,7 @@ class IterativeExperiment:
             print(f"\n🔄 Repairing datasets for iteration {iteration + 1}/{self.n_iterations}...")
             
             for dataset_idx in range(len(self.train_data)):
-                dataset_name = ["boiler", "pump", "vibr", "lake1", "lake2", "lake3"][dataset_idx]
+                dataset_name = ["boiler", "pump", "vibr"][dataset_idx] #, "lake1", "lake2", "lake3"
                 print(f"  Processing dataset {dataset_idx + 1} ({dataset_name})...")
                 
                 for missingness_type in self.missingness_types:
@@ -792,10 +806,53 @@ class IterativeExperiment:
         except Exception as e:
             raise Exception(f"Error loading repaired dataset {file_path}: {e}")
     
+    def load_existing_results(self) -> set:
+        """Load existing results from df_final.csv and return set of computed combinations"""
+        df_final_path = f"{self.output_dir}/df_final.csv"
+        
+        if not os.path.exists(df_final_path):
+            print("ℹ️  No existing df_final.csv found - will compute all combinations")
+            return set()
+        
+        try:
+            df_existing = pd.read_csv(df_final_path)
+            print(f"✓ Loaded existing results from df_final.csv ({len(df_existing)} rows)")
+            
+            # Filter out lake datasets (lake1, lake2, lake3)
+            df_existing_filtered = df_existing[~df_existing['dataset'].str.contains('lake', case=False, na=False)]
+            skipped_lake_count = len(df_existing) - len(df_existing_filtered)
+            if skipped_lake_count > 0:
+                print(f"   Skipping {skipped_lake_count} rows with lake datasets (lake1, lake2, lake3)")
+            
+            # Create set of tuples for fast lookup
+            # Tuple format: (dataset, missing_data_type, missing_rate, iteration_nr, fixing_method, prediction_method)
+            existing_combinations = set()
+            for _, row in df_existing_filtered.iterrows():
+                combination = (
+                    row['dataset'],
+                    row['missing_data_type'],
+                    int(row['missing_rate']),
+                    int(row['iteration_nr']),
+                    row['fixing_method'],
+                    row['prediction_method']
+                )
+                existing_combinations.add(combination)
+            
+            print(f"✓ Found {len(existing_combinations)} existing combinations that will be skipped")
+            return existing_combinations
+            
+        except Exception as e:
+            print(f"⚠️  Warning: Could not load existing results: {e}")
+            print("   Will compute all combinations")
+            return set()
+    
     def run_forecasting_phase(self) -> Dict[str, Any]:
         """Phase 3: Load all repaired datasets and perform forecasting"""
         forecasting_start_time = time.time()
         print(f"\n🔬 PHASE 3: Running forecasting on all repaired datasets...")
+        
+        # Load existing results to skip already computed combinations
+        existing_combinations = self.load_existing_results()
         
         results = {
             'results_dataframe': [],  # List to store results for df_final
@@ -829,6 +886,7 @@ class IterativeExperiment:
         print(f"Will perform {total_forecasting_tasks} forecasting tasks ({len(csv_files)} datasets × {len(self.forecasting_models)} models)")
         
         processed_count = 0
+        skipped_count = 0
         
         for csv_file in sorted(csv_files):
             print(f"\n📁 Processing file: {csv_file}")
@@ -843,7 +901,7 @@ class IterativeExperiment:
                 repaired_data = self.load_repaired_dataset_by_path(file_path)
                 
                 # Get test data for this dataset
-                dataset_names = ["boiler", "pump", "vibr", "lake1", "lake2", "lake3"]
+                dataset_names = ["boiler", "pump", "vibr"]
                 try:
                     dataset_idx = dataset_names.index(metadata['dataset'])
                     test_data = self.test_data[dataset_idx]
@@ -853,6 +911,22 @@ class IterativeExperiment:
                 
                 # Run all forecasting models
                 for forecast_model in self.forecasting_models:
+                    # Check if this combination already exists
+                    combination = (
+                        metadata['dataset'],
+                        metadata['missing_data_type'],
+                        metadata['missing_rate'],
+                        metadata['iteration_nr'],
+                        metadata['fixing_method_original'],
+                        forecast_model
+                    )
+                    
+                    if combination in existing_combinations:
+                        print(f"    ⏭️  Skipping {forecast_model} (already computed)")
+                        skipped_count += 1
+                        processed_count += 1
+                        continue
+                    
                     print(f"    🔮 Forecasting with: {forecast_model}")
                     
                     try:
@@ -878,10 +952,18 @@ class IterativeExperiment:
                             'fixing_method': metadata['fixing_method_original'],
                             'prediction_method': forecast_model,
                             'MAPE': metrics['MAPE'],
+                            'SMAPE': metrics['SMAPE'],
                             'MAE': metrics['MAE'],
                             'RMSE': metrics['RMSE']
                         }
+                        
+                        # Add prediction values as val_1, val_2, ..., val_n columns
+                        for i, pred_value in enumerate(predictions, 1):
+                            result_row[f'val_{i}'] = float(pred_value)  # Convert numpy types to Python float
                         results['results_dataframe'].append(result_row)
+                        
+                        # Save incrementally to CSV after each successful forecast
+                        self.save_incremental_results(results['results_dataframe'])
                         
                         processed_count += 1
                         progress = (processed_count / total_forecasting_tasks) * 100
@@ -906,7 +988,9 @@ class IterativeExperiment:
         print(f"\n✅ Forecasting phase completed!")
         print(f"   - Total time: {forecasting_duration:.2f} seconds")
         print(f"   - Processed: {processed_count}/{total_forecasting_tasks} forecasting tasks")
-        print(f"   - Results: {len(results['results_dataframe'])} rows in final dataframe")
+        print(f"   - Skipped (already computed): {skipped_count}")
+        print(f"   - Newly computed: {processed_count - skipped_count}")
+        print(f"   - New results: {len(results['results_dataframe'])} rows added to dataframe")
         
         return results
     
@@ -916,12 +1000,16 @@ class IterativeExperiment:
         
         original_forecasting_start_time = time.time()
         
+        # Load existing results to skip already computed combinations
+        existing_combinations = self.load_existing_results()
+        
         # Get dataset names for consistent mapping
-        dataset_names = ["boiler", "pump", "vibr", "lake1", "lake2", "lake3"]
+        dataset_names = ["boiler", "pump", "vibr"] #lake1", "lake2", "lake3"
         
         # Counter for progress tracking
         total_original_tasks = len(self.train_data) * len(self.forecasting_models)
         processed_original_count = 0
+        skipped_original_count = 0
         
         print(f"📊 Will perform {total_original_tasks} baseline forecasting tasks")
         print(f"   ({len(self.train_data)} datasets × {len(self.forecasting_models)} models)")
@@ -933,6 +1021,34 @@ class IterativeExperiment:
             print(f"\n📁 Processing original dataset: {dataset_name}")
             
             for forecast_model in self.forecasting_models:
+                # Check if ALL combinations for this dataset+model are already computed
+                all_combinations_exist = True
+                for missingness_type in self.missingness_types:
+                    for rate in self.missingness_rates:
+                        rate_percent = int(rate * 100)
+                        for iteration in range(1, self.n_iterations + 1):
+                            combination = (
+                                dataset_name,
+                                missingness_type,
+                                rate_percent,
+                                iteration,
+                                'original',
+                                forecast_model
+                            )
+                            if combination not in existing_combinations:
+                                all_combinations_exist = False
+                                break
+                        if not all_combinations_exist:
+                            break
+                    if not all_combinations_exist:
+                        break
+                
+                if all_combinations_exist:
+                    print(f"    ⏭️  Skipping {forecast_model} (all original combinations already computed)")
+                    skipped_original_count += 1
+                    processed_original_count += 1
+                    continue
+                
                 print(f"    🔮 Forecasting with: {forecast_model}")
                 
                 try:
@@ -948,6 +1064,19 @@ class IterativeExperiment:
                         for rate in self.missingness_rates:
                             rate_percent = int(rate * 100)
                             for iteration in range(1, self.n_iterations + 1):
+                                # Check if this specific combination exists
+                                combination = (
+                                    dataset_name,
+                                    missingness_type,
+                                    rate_percent,
+                                    iteration,
+                                    'original',
+                                    forecast_model
+                                )
+                                
+                                if combination in existing_combinations:
+                                    continue  # Skip this specific combination
+                                    skipped_original_count += 1
                                 
                                 # Create result row for original data prediction
                                 result_row = {
@@ -958,12 +1087,20 @@ class IterativeExperiment:
                                     'fixing_method': 'original',  # Key identifier for baseline
                                     'prediction_method': forecast_model,
                                     'MAPE': metrics['MAPE'],
+                                    'SMAPE': metrics['SMAPE'],
                                     'MAE': metrics['MAE'],
                                     'RMSE': metrics['RMSE']
                                 }
                                 
+                                # Add prediction values as val_1, val_2, ..., val_n columns
+                                for i, pred_value in enumerate(predictions, 1):
+                                    result_row[f'val_{i}'] = float(pred_value)  # Convert numpy types to Python float
+                                
                                 # Add to results dataframe list
                                 forecasting_results['results_dataframe'].append(result_row)
+                    
+                    # Save incrementally after each model on original data
+                    self.save_incremental_results(forecasting_results['results_dataframe'])
                     
                     processed_original_count += 1
                     progress = (processed_original_count / total_original_tasks) * 100
@@ -987,6 +1124,8 @@ class IterativeExperiment:
         print(f"\n✅ Original dataset forecasting completed!")
         print(f"   - Baseline forecasting time: {original_forecasting_duration:.2f} seconds")
         print(f"   - Processed: {processed_original_count}/{total_original_tasks} baseline tasks")
+        print(f"   - Skipped (already computed): {skipped_original_count}")
+        print(f"   - Newly computed: {processed_original_count - skipped_original_count}")
         print(f"   - Added: {baseline_entries} baseline entries to results")
         print(f"   - Total results now: {len(forecasting_results['results_dataframe'])} rows")
         
@@ -1009,13 +1148,13 @@ class IterativeExperiment:
         print(f"  - Test size: {self.test_size}")
         
         # PHASE 0: Generate original images for visualization
-        self.generate_original_images()
+        # self.generate_original_images() #TOUNCOMMENT
         
         # PHASE 1: Generate and save all degraded datasets for all iterations
-        self.generate_and_save_degraded_datasets()
+        # self.generate_and_save_degraded_datasets() #TOUNCOMMENT
         
         # PHASE 2: Repair all degraded datasets and save to 2_fixed_data
-        self.repair_and_save_datasets()
+        # self.repair_and_save_datasets() #TOUNCOMMENT
         
         # Collect initial system state
         initial_system_state = {
@@ -1048,11 +1187,38 @@ class IterativeExperiment:
             'processes_count': len(psutil.pids())
         }
         
-        # Create final dataframe
-        df_final = self.create_final_dataframe(forecasting_results)
+        # Create final dataframe from new results
+        df_new_results = self.create_final_dataframe(forecasting_results)
+        
+        # Merge with existing results if they exist
+        df_final_path = f"{self.output_dir}/df_final.csv"
+        if os.path.exists(df_final_path):
+            print(f"📊 Merging new results with existing df_final.csv...")
+            df_existing = pd.read_csv(df_final_path)
+            print(f"   - Existing results: {len(df_existing)} rows")
+            
+            # Filter out lake datasets
+            df_existing_filtered = df_existing[~df_existing['dataset'].str.contains('lake', case=False, na=False)]
+            skipped_lake_count = len(df_existing) - len(df_existing_filtered)
+            if skipped_lake_count > 0:
+                print(f"   - Filtered out {skipped_lake_count} rows with lake datasets")
+            
+            print(f"   - New results: {len(df_new_results)} rows")
+            
+            # Combine existing and new results
+            df_final = pd.concat([df_existing_filtered, df_new_results], ignore_index=True)
+            
+            # Remove any duplicates (in case of re-runs)
+            df_final = df_final.drop_duplicates(
+                subset=['dataset', 'missing_data_type', 'missing_rate', 'iteration_nr', 'fixing_method', 'prediction_method'],
+                keep='last'  # Keep the most recent computation
+            )
+            print(f"   - Combined results: {len(df_final)} rows (after removing duplicates)")
+        else:
+            df_final = df_new_results
+            print(f"📊 No existing df_final.csv found - creating new file")
         
         # Save final dataframe to CSV
-        df_final_path = f"{self.output_dir}/df_final.csv"
         df_final.to_csv(df_final_path, index=False)
         print(f"✅ Final dataframe saved to: {df_final_path}")
         
@@ -1103,9 +1269,16 @@ class IterativeExperiment:
             df_final_path = f"{self.output_dir}/df_final.csv"
             if os.path.exists(df_final_path):
                 df_final = pd.read_csv(df_final_path)
+                
+                # Filter out lake datasets
+                df_final_filtered = df_final[~df_final['dataset'].str.contains('lake', case=False, na=False)]
+                skipped_lake_count = len(df_final) - len(df_final_filtered)
+                
                 print(f"✅ Loaded final dataframe from: {df_final_path}")
-                print(f"📊 Shape: {df_final.shape}")
-                return df_final
+                if skipped_lake_count > 0:
+                    print(f"   Filtered out {skipped_lake_count} rows with lake datasets")
+                print(f"📊 Shape: {df_final_filtered.shape}")
+                return df_final_filtered
             else:
                 print(f"❌ Final dataframe not found at: {df_final_path}")
                 print("Please run the experiment first using run_experiment()")
@@ -1187,7 +1360,7 @@ class IterativeExperiment:
             print("⚠️ No results in final dataframe")
         
         print(f"\n🎯 Best Performance by Metric:")
-        for metric in ['MAPE', 'MAE', 'RMSE']:
+        for metric in ['MAPE', 'SMAPE']:
             best_idx = df_final[metric].idxmin()
             best_row = df_final.loc[best_idx]
             print(f"  {metric}: {best_row[metric]:.4f} (Dataset: {best_row['dataset']}, Missing: {best_row['missing_data_type']}, Fix: {best_row['fixing_method']}, Predict: {best_row['prediction_method']})")
@@ -1207,7 +1380,7 @@ class IterativeExperiment:
         """Generate and save original images for each dataset and encoder method"""
         print("\n🖼️ GENERATING ORIGINAL IMAGES...")
         
-        dataset_names = ["boiler", "pump", "vibr", "lake1", "lake2", "lake3"]
+        dataset_names = ["boiler", "pump", "vibr"] # , "lake1", "lake2", "lake3"
         
         for dataset_idx, train_data in enumerate(self.train_data):
             dataset_name = dataset_names[dataset_idx]
@@ -1241,6 +1414,56 @@ class IterativeExperiment:
         
         print("✅ All original images generated!")
     
+    def save_incremental_results(self, results_dataframe_list: list):
+        """Save results incrementally to CSV after each forecast"""
+        if not results_dataframe_list:
+            return
+        
+        df_final_path = f"{self.output_dir}/df_final.csv"
+        df_temp_path = f"{self.output_dir}/df_final_temp.csv"
+        
+        # Convert current results to DataFrame
+        df_new = pd.DataFrame(results_dataframe_list)
+        
+        # Load existing results if they exist
+        if os.path.exists(df_final_path):
+            try:
+                df_existing = pd.read_csv(df_final_path)
+                
+                # Filter out lake datasets
+                df_existing_filtered = df_existing[~df_existing['dataset'].str.contains('lake', case=False, na=False)]
+                skipped_lake_count = len(df_existing) - len(df_existing_filtered)
+                if skipped_lake_count > 0:
+                    print(f"   Filtered out {skipped_lake_count} rows with lake datasets during incremental save")
+                
+                # Merge: combine and remove duplicates (keep newest)
+                df_combined = pd.concat([df_existing_filtered, df_new], ignore_index=True)
+                
+                # Remove duplicates based on key columns (keep last = newest)
+                key_cols = ['dataset', 'missing_data_type', 'missing_rate', 
+                           'iteration_nr', 'fixing_method', 'prediction_method']
+                df_final = df_combined.drop_duplicates(subset=key_cols, keep='last')
+            except Exception as e:
+                print(f"Warning: Could not merge with existing results: {e}")
+                df_final = df_new
+        else:
+            df_final = df_new
+        
+        # Atomic write: save to temp file first, then rename
+        try:
+            df_final.to_csv(df_temp_path, index=False)
+            
+            # Atomic rename (safe on POSIX systems)
+            if os.path.exists(df_final_path):
+                os.replace(df_temp_path, df_final_path)
+            else:
+                os.rename(df_temp_path, df_final_path)
+        except Exception as e:
+            print(f"Warning: Incremental save failed: {e}")
+            # Clean up temp file if it exists
+            if os.path.exists(df_temp_path):
+                os.remove(df_temp_path)
+    
     def create_final_dataframe(self, forecasting_results: Dict) -> pd.DataFrame:
         """Create the final results dataframe from forecasting results"""
         print("\nCreating final results dataframe...")
@@ -1256,7 +1479,12 @@ class IterativeExperiment:
         df_final = pd.DataFrame(all_rows)
         
         # Ensure all required columns are present
-        required_columns = ['dataset', 'missing_data_type', 'missing_rate', 'iteration_nr', 'fixing_method', 'prediction_method', 'MAPE', 'MAE', 'RMSE']
+        required_columns = ['dataset', 'missing_data_type', 'missing_rate', 'iteration_nr', 'fixing_method', 'prediction_method', 'MAPE', 'SMAPE'] #'MAE', 'RMSE'
+        
+        # Add val_1, val_2, ..., val_n columns based on test_size
+        for i in range(1, self.test_size + 1):
+            required_columns.append(f'val_{i}')
+        
         for col in required_columns:
             if col not in df_final.columns:
                 print(f"⚠️ Warning: Column '{col}' not found in results")
@@ -1328,7 +1556,7 @@ class IterativeExperiment:
         std_metrics = results['std_metrics']
         
         # Organize data for plotting
-        for metric in ['MAE', 'RMSE', 'MAPE']:
+        for metric in ['MAPE', 'SMAPE']: #'MAE', 'RMSE', 
             # Collect data for plotting
             plot_data = []
             for key, metrics in mean_metrics.items():
@@ -1425,7 +1653,7 @@ class IterativeExperiment:
         raw_metrics = results['raw_metrics']
         test_results = []
         
-        for metric in ['MAE', 'RMSE', 'MAPE']:
+        for metric in ['MAPE', 'SMAPE']: #'MAE', 'RMSE', 
             for missingness_type in self.missingness_types:
                 for rate in self.missingness_rates:
                     rate_percent = int(rate * 100)
@@ -1501,7 +1729,7 @@ class IterativeExperiment:
         # Apply Bonferroni correction within each metric group
         bonferroni_results = []
         
-        for metric in ['MAE', 'RMSE', 'MAPE']:
+        for metric in ['MAPE', 'SMAPE']: #'MAE', 'RMSE', 
             metric_subset = df_tests[df_tests['metric'] == metric].copy()
             
             if not metric_subset.empty:
@@ -1541,7 +1769,7 @@ class IterativeExperiment:
         """Create comparison plots showing original vs Bonferroni corrected p-values"""
         print("Creating Bonferroni correction comparison plots...")
         
-        for metric in ['MAE', 'RMSE', 'MAPE']:
+        for metric in ['MAPE', 'SMAPE']: #'MAE', 'RMSE', 
             subset = df_bonferroni[df_bonferroni['metric'] == metric]
             
             if subset.empty:
@@ -1669,7 +1897,7 @@ class IterativeExperiment:
         # Calculate summary statistics
         summary_data = []
         
-        for metric in ['MAE', 'RMSE', 'MAPE']:
+        for metric in ['MAPE', 'SMAPE']: #'MAE', 'RMSE', 
             metric_subset = df_bonferroni[df_bonferroni['metric'] == metric]
             
             if not metric_subset.empty:
@@ -1760,7 +1988,7 @@ class IterativeExperiment:
         raw_metrics = results['raw_metrics']
         anova_results = []
         
-        for metric in ['MAE', 'RMSE', 'MAPE']:
+        for metric in ['MAPE', 'SMAPE']: #'MAE', 'RMSE', 
             print(f"Processing ANOVA for {metric}...")
             
             # Prepare long-form data for this metric across all conditions
@@ -2212,7 +2440,7 @@ class IterativeExperiment:
         """Create bar charts showing p-values with significance threshold"""
         print("Creating statistical test plots...")
         
-        for metric in ['MAE', 'RMSE', 'MAPE']:
+        for metric in ['MAPE', 'SMAPE']: #'MAE', 'RMSE', 
             for forecast_model in self.forecasting_models:
                 for rate in self.missingness_rates:
                     rate_percent = int(rate * 100)
