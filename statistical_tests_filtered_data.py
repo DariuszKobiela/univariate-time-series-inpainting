@@ -187,7 +187,9 @@ def create_discrete_pvalue_heatmap(all_data, output_dir):
     
     # Create matrix
     sd_methods = ['rpsd2all4', 'mtfsd2all4', 'gafsd2all4', 'specsd2all4']
+    sd_methods_display = ['rpsd', 'mtfsd', 'gafsd', 'specsd']  # Short names for display
     matrix = np.zeros((len(all_methods), len(sd_methods)))  # Transposed!
+    mean_diff_matrix = np.zeros((len(all_methods), len(sd_methods)))  # For direction
     
     for j, sd_method in enumerate(sd_methods):
         if sd_method not in all_data:
@@ -197,9 +199,12 @@ def create_discrete_pvalue_heatmap(all_data, output_dir):
             row = df[df['comparison_method'] == comp_method]
             if not row.empty:
                 p_val = row['p_value_bonferroni'].values[0]
+                mean_diff = row['mean_diff'].values[0]
                 matrix[i, j] = p_val
+                mean_diff_matrix[i, j] = mean_diff
             else:
                 matrix[i, j] = np.nan
+                mean_diff_matrix[i, j] = np.nan
     
     # Convert to discrete categories
     # 0 = p < 0.01 (highly significant)
@@ -223,7 +228,7 @@ def create_discrete_pvalue_heatmap(all_data, output_dir):
     # Set ticks
     ax.set_xticks(np.arange(len(sd_methods)))
     ax.set_yticks(np.arange(len(all_methods)))
-    ax.set_xticklabels(sd_methods, fontsize=11, fontweight='bold')
+    ax.set_xticklabels(sd_methods_display, fontsize=11, fontweight='bold')
     ax.set_yticklabels(all_methods, fontsize=10)
     
     # Rotate x labels
@@ -234,34 +239,54 @@ def create_discrete_pvalue_heatmap(all_data, output_dir):
     ax.set_yticks(np.arange(len(all_methods)) - 0.5, minor=True)
     ax.grid(which='minor', color='white', linestyle='-', linewidth=2)
     
-    # Add text annotations with actual p-values
+    # Add text annotations with p-values, direction, and MAPE values
     for i in range(len(all_methods)):
         for j in range(len(sd_methods)):
             p_val = matrix[i, j]
-            if not np.isnan(p_val):
+            mean_diff = mean_diff_matrix[i, j]
+            
+            if not np.isnan(p_val) and not np.isnan(mean_diff):
+                # Determine direction (for MAPE: lower is better)
+                if mean_diff > 0:
+                    direction = '▲'  # classical method better (SD has higher MAPE)
+                elif mean_diff < 0:
+                    direction = '▼'  # inpainting method better (SD has lower MAPE)
+                else:
+                    direction = '='
+                
+                # Significance level
                 if p_val < 0.001:
-                    text = '***'
+                    sig = '***'
                     color = 'white'
                 elif p_val < 0.01:
-                    text = '**'
+                    sig = '**'
                     color = 'white'
                 elif p_val < 0.05:
-                    text = '*'
+                    sig = '*'
                     color = 'black'
                 else:
-                    text = 'ns'
+                    sig = 'ns'
                     color = 'black'
                 
+                # Format MAPE value in %
+                mape_val = abs(mean_diff)
+                if mape_val >= 10:
+                    mape_str = f'{mape_val:.1f}%'
+                else:
+                    mape_str = f'{mape_val:.2f}%'
+                
+                text = f'{sig}\n{direction}\n{mape_str}'
+                
                 ax.text(j, i, text, ha='center', va='center', 
-                       color=color, fontsize=12, fontweight='bold')
+                       color=color, fontsize=9, fontweight='bold')
     
     # Labels
-    ax.set_xlabel('SD Methods', fontsize=13, fontweight='bold', labelpad=10)
-    ax.set_ylabel('Comparison Methods', fontsize=13, fontweight='bold', labelpad=10)
+    ax.set_xlabel('Inpainting Methods', fontsize=13, fontweight='bold', labelpad=10)
+    ax.set_ylabel('Classical Methods', fontsize=13, fontweight='bold', labelpad=10)
     
     # Title
-    plt.title('Statistical Significance: Inpainting Methods vs Other Methods\n(Bonferroni-corrected p-values)', 
-              fontsize=14, fontweight='bold', pad=20)
+    plt.title('Statistical Significance: Inpainting Methods vs Classical Methods\n(Bonferroni-corrected p-values, MAPE in %)\n▲ = Classical better | ▼ = Inpainting better', 
+              fontsize=13, fontweight='bold', pad=20)
     
     # Create custom legend
     legend_elements = [
@@ -293,6 +318,7 @@ def create_pvalue_heatmap_log_vertical(all_data, output_dir):
     
     # Create matrix (transposed!)
     sd_methods = ['rpsd2all4', 'mtfsd2all4', 'gafsd2all4', 'specsd2all4']
+    sd_methods_display = ['rpsd', 'mtfsd', 'gafsd', 'specsd']  # Short names for display
     matrix = np.zeros((len(all_methods), len(sd_methods)))  # Transposed dimensions
     
     for j, sd_method in enumerate(sd_methods):
@@ -314,7 +340,7 @@ def create_pvalue_heatmap_log_vertical(all_data, output_dir):
     matrix_log = -np.log10(matrix_log)
     
     sns.heatmap(matrix_log, 
-                xticklabels=sd_methods,
+                xticklabels=sd_methods_display,
                 yticklabels=all_methods,
                 cmap='RdYlGn',
                 center=1.301,
@@ -325,10 +351,10 @@ def create_pvalue_heatmap_log_vertical(all_data, output_dir):
                 linewidths=0.5,
                 linecolor='white')
     
-    plt.title('Statistical Significance: Inpainting Methods vs Other Methods \n(-log10 of Bonferroni-corrected p-values)', 
+    plt.title('Statistical Significance: Inpainting Methods vs Classical Methods \n(-log10 of Bonferroni-corrected p-values)', 
               fontsize=14, fontweight='bold', pad=20)
-    plt.xlabel('SD Methods', fontsize=12, fontweight='bold')
-    plt.ylabel('Comparison Methods', fontsize=12, fontweight='bold')
+    plt.xlabel('Inpainting Methods', fontsize=12, fontweight='bold')
+    plt.ylabel('Classical Methods', fontsize=12, fontweight='bold')
     plt.xticks(rotation=45, ha='right')
     
     # Add colorbar labels
@@ -359,6 +385,7 @@ def create_mean_difference_heatmap(all_data, output_dir):
     
     # Create matrix (transposed!)
     sd_methods = ['rpsd2all4', 'mtfsd2all4', 'gafsd2all4', 'specsd2all4']
+    sd_methods_display = ['rpsd', 'mtfsd', 'gafsd', 'specsd']  # Short names for display
     matrix = np.zeros((len(all_methods), len(sd_methods)))
     
     for j, sd_method in enumerate(sd_methods):
@@ -376,25 +403,210 @@ def create_mean_difference_heatmap(all_data, output_dir):
     fig, ax = plt.subplots(figsize=(8, 10))
     
     sns.heatmap(matrix, 
-                xticklabels=sd_methods,
+                xticklabels=sd_methods_display,
                 yticklabels=all_methods,
                 cmap='RdYlGn_r',
                 center=0,
                 annot=False,
-                cbar_kws={'label': 'Mean MAPE Difference\nPositive = SD method is worse'},
+                cbar_kws={'label': 'Mean MAPE Diff (%)\nPositive = Inpainting worse'},
                 linewidths=0.5,
                 linecolor='white',
                 fmt='.4f')
     
-    plt.title('Mean MAPE Differences: Inpainting Methods vs Other Methods \n(Positive = SD method has higher MAPE = worse)', 
+    # Add annotations with MAPE values and direction
+    for i in range(len(all_methods)):
+        for j in range(len(sd_methods)):
+            mape_diff = matrix[i, j]
+            
+            if not np.isnan(mape_diff):
+                # Determine direction
+                if mape_diff > 0:
+                    direction = '▲'  # classical method better
+                elif mape_diff < 0:
+                    direction = '▼'  # inpainting method better
+                else:
+                    direction = '='
+                
+                # Format MAPE in %
+                mape_val = abs(mape_diff)
+                if mape_val >= 10:
+                    text = f'{mape_diff:.1f}%\n{direction}'
+                else:
+                    text = f'{mape_diff:.2f}%\n{direction}'
+                
+                # Color based on background
+                if abs(mape_diff) < 50:
+                    color = 'black'
+                else:
+                    color = 'white'
+                
+                ax.text(j, i, text, ha='center', va='center',
+                       color=color, fontsize=8, fontweight='bold')
+    
+    plt.title('Mean MAPE Differences: Inpainting Methods vs Classical Methods \n(Positive = Inpainting has higher MAPE = worse)', 
               fontsize=14, fontweight='bold', pad=20)
-    plt.xlabel('SD Methods', fontsize=12, fontweight='bold')
-    plt.ylabel('Comparison Methods', fontsize=12, fontweight='bold')
+    plt.xlabel('Inpainting Methods', fontsize=12, fontweight='bold')
+    plt.ylabel('Classical Methods', fontsize=12, fontweight='bold')
     plt.xticks(rotation=45, ha='right')
     
     plt.tight_layout()
     
     output_file = output_dir / 'heatmap_mean_differences_filtered.png'
+    plt.savefig(output_file, dpi=300, bbox_inches='tight')
+    print(f"✅ Saved: {output_file}")
+    
+    plt.close()
+
+def create_combined_plot(all_data, output_dir):
+    """Create combined plot with both p-values and mean MAPE differences"""
+    import matplotlib.pyplot as plt
+    import seaborn as sns
+    
+    # Get all comparison methods
+    all_methods = set()
+    for df in all_data.values():
+        all_methods.update(df['comparison_method'].tolist())
+    all_methods = sorted(list(all_methods))
+    
+    sd_methods = ['rpsd2all4', 'mtfsd2all4', 'gafsd2all4', 'specsd2all4']
+    sd_methods_display = ['rpsd', 'mtfsd', 'gafsd', 'specsd']  # Short names
+    
+    # Create matrices
+    pvalue_matrix = np.zeros((len(sd_methods), len(all_methods)))
+    diff_matrix = np.zeros((len(sd_methods), len(all_methods)))
+    
+    for i, sd_method in enumerate(sd_methods):
+        df = all_data[sd_method]
+        for j, comp_method in enumerate(all_methods):
+            row = df[df['comparison_method'] == comp_method]
+            if not row.empty:
+                pvalue_matrix[i, j] = row['p_value_bonferroni'].values[0]
+                diff_matrix[i, j] = row['mean_diff'].values[0]
+            else:
+                pvalue_matrix[i, j] = np.nan
+                diff_matrix[i, j] = np.nan
+    
+    # Create figure with two subplots
+    fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(14, 10))
+    
+    # Plot 1: P-values
+    pvalue_matrix_log = np.where(pvalue_matrix == 0, 1e-10, pvalue_matrix)
+    pvalue_matrix_log = -np.log10(pvalue_matrix_log)
+    
+    im1 = sns.heatmap(pvalue_matrix_log, 
+                xticklabels=all_methods,
+                yticklabels=sd_methods_display,
+                cmap='RdYlGn',
+                center=1.301,
+                vmin=0,
+                vmax=6,
+                annot=False,
+                cbar_kws={'label': '-log10(p-value)'},
+                linewidths=0.5,
+                linecolor='white',
+                ax=ax1)
+    
+    # Add reference lines to colorbar
+    cbar1 = ax1.collections[0].colorbar
+    cbar1.ax.axhline(y=1.301, color='blue', linestyle='--', linewidth=2, alpha=0.7)
+    cbar1.ax.axhline(y=2, color='blue', linestyle='--', linewidth=2, alpha=0.7)
+    cbar1.ax.axhline(y=3, color='blue', linestyle='--', linewidth=2, alpha=0.7)
+    cbar1.ax.text(-0.5, 1.301, 'p=0.05', va='center', ha='right', fontsize=8, color='blue', fontweight='bold')
+    cbar1.ax.text(-0.5, 2, 'p=0.01', va='center', ha='right', fontsize=8, color='blue', fontweight='bold')
+    cbar1.ax.text(-0.5, 3, 'p=0.001', va='center', ha='right', fontsize=8, color='blue', fontweight='bold')
+    
+    # Add annotations: significance + direction
+    for i in range(len(sd_methods)):
+        for j in range(len(all_methods)):
+            p_val = pvalue_matrix[i, j]
+            mean_diff = diff_matrix[i, j]
+            
+            if not np.isnan(p_val) and not np.isnan(mean_diff):
+                # Direction
+                if mean_diff > 0:
+                    direction = '▲'  # classical better (lower MAPE)
+                    color = 'white' if p_val < 0.01 else 'black'
+                elif mean_diff < 0:
+                    direction = '▼'  # inpainting better (lower MAPE)
+                    color = 'white' if p_val < 0.01 else 'black'
+                else:
+                    direction = '='
+                    color = 'black'
+                
+                # Significance
+                if p_val < 0.001:
+                    sig = '***'
+                elif p_val < 0.01:
+                    sig = '**'
+                elif p_val < 0.05:
+                    sig = '*'
+                else:
+                    sig = 'ns'
+                
+                text = f'{sig}\n{direction}'
+                ax1.text(j + 0.5, i + 0.5, text, ha='center', va='center',
+                        color=color, fontsize=9, fontweight='bold')
+    
+    ax1.set_title('A) Statistical Significance (-log10 of p-values)', fontsize=12, fontweight='bold', pad=10)
+    ax1.set_xlabel('')
+    ax1.set_ylabel('Inpainting Methods', fontsize=11, fontweight='bold')
+    ax1.set_xticklabels([])
+    
+    # Plot 2: Mean MAPE differences (in %, 2 decimal places)
+    im2 = sns.heatmap(diff_matrix, 
+                xticklabels=all_methods,
+                yticklabels=sd_methods_display,
+                cmap='RdYlGn_r',
+                center=0,
+                annot=False,
+                fmt='.2f',
+                cbar_kws={'label': 'Mean MAPE Diff (%)'},
+                linewidths=0.5,
+                linecolor='white',
+                ax=ax2)
+    
+    # Add annotations with direction for Plot 2
+    for i in range(len(sd_methods)):
+        for j in range(len(all_methods)):
+            mean_diff = diff_matrix[i, j]
+            
+            if not np.isnan(mean_diff):
+                # Direction
+                if mean_diff > 0:
+                    direction = '▲'  # classical better
+                elif mean_diff < 0:
+                    direction = '▼'  # inpainting better
+                else:
+                    direction = '='
+                
+                # Format value
+                value_text = f'{mean_diff:.2f}\n{direction}'
+                text_color = 'white' if abs(mean_diff) > 5 else 'black'
+                
+                ax2.text(j + 0.5, i + 0.5, value_text, ha='center', va='center',
+                        color=text_color, fontsize=8, fontweight='bold')
+    
+    ax2.set_title('B) Mean MAPE Difference (%)', fontsize=12, fontweight='bold', pad=10)
+    ax2.set_xlabel('Classical Methods', fontsize=11, fontweight='bold')
+    ax2.set_ylabel('Inpainting Methods', fontsize=11, fontweight='bold')
+    plt.xticks(rotation=45, ha='right')
+    
+    # Add main title
+    fig.suptitle('Statistical Comparison: Inpainting Methods vs Classical Methods (MAPE)', 
+                 fontsize=16, fontweight='bold', y=0.98)
+    
+    # Add legend at the top, below the title - one clean box
+    legend_text = ('Statistical significance: *** p<0.001   ** p<0.01   * p<0.05   ns = not significant\n'
+                   'Performance indicators: ▲ = Classical method better (lower MAPE)   ▼ = Inpainting method better (lower MAPE)')
+    
+    fig.text(0.5, 0.935, legend_text, ha='center', fontsize=10, 
+             bbox=dict(boxstyle='round,pad=0.8', facecolor='lightyellow', 
+                      alpha=0.9, edgecolor='darkgray', linewidth=1.5),
+             verticalalignment='top')
+    
+    plt.tight_layout(rect=[0, 0, 1, 0.91])
+    
+    output_file = output_dir / 'heatmap_combined_filtered.png'
     plt.savefig(output_file, dpi=300, bbox_inches='tight')
     print(f"✅ Saved: {output_file}")
     
@@ -408,7 +620,7 @@ def main():
     print("="*80)
     
     # Load filtered data
-    csv_path = 'results/quick_experiment/df_filtered_without_lakes_unet.csv'
+    csv_path = 'results/quick_experiment/df_final_filtered_xgboost_no_unet.csv'
     print(f"\nLoading data from: {csv_path}")
     
     try:
@@ -457,13 +669,16 @@ def main():
         print("CREATING VISUALIZATIONS")
         print(f"{'='*80}")
         
-        print("\n1. Discrete p-value heatmap...")
+        print("\n1. Combined heatmap (p-values + mean differences)...")
+        create_combined_plot(all_results, output_dir)
+        
+        print("\n2. Discrete p-value heatmap...")
         create_discrete_pvalue_heatmap(all_results, output_dir)
         
-        print("\n2. P-value heatmap (log scale - vertical)...")
+        print("\n3. P-value heatmap (log scale - vertical)...")
         create_pvalue_heatmap_log_vertical(all_results, output_dir)
         
-        print("\n3. Mean difference heatmap...")
+        print("\n4. Mean difference heatmap...")
         create_mean_difference_heatmap(all_results, output_dir)
     
     print("\n" + "="*80)
@@ -475,6 +690,7 @@ def main():
     for sd_method in sd_methods.keys():
         print(f"    - {sd_method}_vs_others.csv")
     print("  Visualization files:")
+    print("    - heatmap_combined_filtered.png (⭐ main plot)")
     print("    - heatmap_pvalues_discrete_filtered.png")
     print("    - heatmap_pvalues_log_vertical_filtered.png")
     print("    - heatmap_mean_differences_filtered.png")

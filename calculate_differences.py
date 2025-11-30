@@ -109,6 +109,41 @@ def compare_files(source_file_path, fixed_file_path):
         return None
 
 
+def load_existing_results(output_file):
+    """
+    Wczytuje istniejące wyniki z pliku CSV.
+    
+    Returns:
+        tuple: (existing_results list, existing_combinations set)
+    """
+    existing_results = []
+    existing_combinations = set()
+    
+    if Path(output_file).exists():
+        try:
+            df = pd.read_csv(output_file)
+            existing_results = df.to_dict('records')
+            
+            # Stwórz zbiór kombinacji już przetworzonych
+            for row in existing_results:
+                key = (
+                    row['dataset_name'],
+                    row['missing_data_type'],
+                    row['missing_rate'],
+                    row['iteration_nr'],
+                    row['fixing_method']
+                )
+                existing_combinations.add(key)
+            
+            print(f"✓ Wczytano {len(existing_results)} istniejących wyników z {output_file}")
+        except Exception as e:
+            print(f"Uwaga: Nie można wczytać istniejących wyników: {e}")
+    else:
+        print(f"Plik {output_file} nie istnieje - zostaną stworzone nowe wyniki")
+    
+    return existing_results, existing_combinations
+
+
 def main():
     """Główna funkcja skryptu"""
     
@@ -119,10 +154,15 @@ def main():
     # Mapowanie dataset'ów
     dataset_mapping = get_dataset_mapping()
     
-    # Lista do przechowywania wyników
-    results = []
+    # Wczytaj istniejące wyniki
+    existing_results, existing_combinations = load_existing_results(output_file)
     
-    print("Rozpoczynam porównywanie plików...")
+    # Lista do przechowywania NOWYCH wyników
+    new_results = []
+    skipped_count = 0
+    processed_count = 0
+    
+    print("\nRozpoczynam porównywanie plików...")
     
     # Przejdź przez wszystkie pliki w data/2_fixed_data
     for fixed_file in fixed_data_dir.glob("*.csv"):
@@ -131,6 +171,12 @@ def main():
         try:
             # Parsuj nazwę pliku
             dataset_name, missing_data_type, missing_rate, iteration_nr, fixing_method = parse_filename(filename)
+            
+            # Sprawdź czy ta kombinacja już została przetworzona
+            key = (dataset_name, missing_data_type, missing_rate, iteration_nr, fixing_method)
+            if key in existing_combinations:
+                skipped_count += 1
+                continue
             
             # Znajdź odpowiadający plik źródłowy
             if dataset_name not in dataset_mapping:
@@ -148,8 +194,8 @@ def main():
             difference = compare_files(source_file_path, str(fixed_file))
             
             if difference is not None:
-                # Dodaj wynik do listy
-                results.append({
+                # Dodaj wynik do listy NOWYCH wyników
+                new_results.append({
                     'dataset_name': dataset_name,
                     'missing_data_type': missing_data_type,
                     'missing_rate': missing_rate,
@@ -158,24 +204,31 @@ def main():
                     'difference': difference
                 })
                 
-                print(f"Przetworzono: {filename} -> różnica: {difference:.6f}")
+                processed_count += 1
+                print(f"[{processed_count}] ✓ {filename} -> {difference:.2f}")
             
         except Exception as e:
             print(f"Błąd podczas przetwarzania pliku {filename}: {e}")
             continue
     
-    # Zapisz wyniki do CSV
-    if results:
+    # Połącz stare i nowe wyniki
+    all_results = existing_results + new_results
+    
+    # Zapisz WSZYSTKIE wyniki do CSV
+    if all_results:
         with open(output_file, 'w', newline='', encoding='utf-8') as csvfile:
             fieldnames = ['dataset_name', 'missing_data_type', 'missing_rate', 'iteration_nr', 'fixing_method', 'difference']
             writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
             
             writer.writeheader()
-            for result in results:
+            for result in all_results:
                 writer.writerow(result)
         
-        print(f"\nWyniki zapisane do pliku: {output_file}")
-        print(f"Przetworzono {len(results)} plików.")
+        print(f"\n✓ Wyniki zapisane do pliku: {output_file}")
+        print(f"  - Istniejących wyników: {len(existing_results)}")
+        print(f"  - Nowych wyników: {len(new_results)}")
+        print(f"  - Pominiętych (już policzonych): {skipped_count}")
+        print(f"  - Łącznie w pliku: {len(all_results)}")
     else:
         print("Brak wyników do zapisania.")
 

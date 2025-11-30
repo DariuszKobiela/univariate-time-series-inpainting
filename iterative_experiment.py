@@ -818,10 +818,16 @@ class IterativeExperiment:
             df_existing = pd.read_csv(df_final_path)
             print(f"✓ Loaded existing results from df_final.csv ({len(df_existing)} rows)")
             
+            # Filter out lake datasets (lake1, lake2, lake3)
+            df_existing_filtered = df_existing[~df_existing['dataset'].str.contains('lake', case=False, na=False)]
+            skipped_lake_count = len(df_existing) - len(df_existing_filtered)
+            if skipped_lake_count > 0:
+                print(f"   Skipping {skipped_lake_count} rows with lake datasets (lake1, lake2, lake3)")
+            
             # Create set of tuples for fast lookup
             # Tuple format: (dataset, missing_data_type, missing_rate, iteration_nr, fixing_method, prediction_method)
             existing_combinations = set()
-            for _, row in df_existing.iterrows():
+            for _, row in df_existing_filtered.iterrows():
                 combination = (
                     row['dataset'],
                     row['missing_data_type'],
@@ -1190,10 +1196,17 @@ class IterativeExperiment:
             print(f"📊 Merging new results with existing df_final.csv...")
             df_existing = pd.read_csv(df_final_path)
             print(f"   - Existing results: {len(df_existing)} rows")
+            
+            # Filter out lake datasets
+            df_existing_filtered = df_existing[~df_existing['dataset'].str.contains('lake', case=False, na=False)]
+            skipped_lake_count = len(df_existing) - len(df_existing_filtered)
+            if skipped_lake_count > 0:
+                print(f"   - Filtered out {skipped_lake_count} rows with lake datasets")
+            
             print(f"   - New results: {len(df_new_results)} rows")
             
             # Combine existing and new results
-            df_final = pd.concat([df_existing, df_new_results], ignore_index=True)
+            df_final = pd.concat([df_existing_filtered, df_new_results], ignore_index=True)
             
             # Remove any duplicates (in case of re-runs)
             df_final = df_final.drop_duplicates(
@@ -1256,9 +1269,16 @@ class IterativeExperiment:
             df_final_path = f"{self.output_dir}/df_final.csv"
             if os.path.exists(df_final_path):
                 df_final = pd.read_csv(df_final_path)
+                
+                # Filter out lake datasets
+                df_final_filtered = df_final[~df_final['dataset'].str.contains('lake', case=False, na=False)]
+                skipped_lake_count = len(df_final) - len(df_final_filtered)
+                
                 print(f"✅ Loaded final dataframe from: {df_final_path}")
-                print(f"📊 Shape: {df_final.shape}")
-                return df_final
+                if skipped_lake_count > 0:
+                    print(f"   Filtered out {skipped_lake_count} rows with lake datasets")
+                print(f"📊 Shape: {df_final_filtered.shape}")
+                return df_final_filtered
             else:
                 print(f"❌ Final dataframe not found at: {df_final_path}")
                 print("Please run the experiment first using run_experiment()")
@@ -1410,8 +1430,14 @@ class IterativeExperiment:
             try:
                 df_existing = pd.read_csv(df_final_path)
                 
+                # Filter out lake datasets
+                df_existing_filtered = df_existing[~df_existing['dataset'].str.contains('lake', case=False, na=False)]
+                skipped_lake_count = len(df_existing) - len(df_existing_filtered)
+                if skipped_lake_count > 0:
+                    print(f"   Filtered out {skipped_lake_count} rows with lake datasets during incremental save")
+                
                 # Merge: combine and remove duplicates (keep newest)
-                df_combined = pd.concat([df_existing, df_new], ignore_index=True)
+                df_combined = pd.concat([df_existing_filtered, df_new], ignore_index=True)
                 
                 # Remove duplicates based on key columns (keep last = newest)
                 key_cols = ['dataset', 'missing_data_type', 'missing_rate', 
