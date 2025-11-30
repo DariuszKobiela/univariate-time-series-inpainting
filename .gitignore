@@ -7,6 +7,22 @@
 # Ignoruj pliki CSV z folderu data/ i jego podfolderów
 data/**/*.csv
 
+# Ignoruj CSV files z wynikami (poza wybranymi backupami)
+*.csv
+!requirements*.csv
+
+# Ignoruj pliki LaTeX
+*.tex
+*.aux
+*.log
+*.out
+*.toc
+*.bbl
+*.blg
+*.synctex.gz
+*.fdb_latexmk
+*.fls
+
 # Ignoruj pliki cache i tymczasowe pliki Python
 __pycache__/
 *.pyc
@@ -32,6 +48,39 @@ models/**/*.log.tar.lzma
 models/**/*.log.tar.lz4
 models/**/*.log.tar.zstd
 models/**/*.log.tar.zstd
+
+# IDE i edytory
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# Jupyter Notebook
+.ipynb_checkpoints/
+*.ipynb
+
+# Pytest
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Environments
+.env
+.venv
+env/
+venv/
+ENV/
+env.bak/
+venv.bak/
+
+# Backup files
+*.bak
+*.backup
+*_backup.*
+*_old.*
+*_temp.*
 
 # Zachowaj strukturę folderów (nie ignoruj plików .gitkeep)
 !.gitkeep
