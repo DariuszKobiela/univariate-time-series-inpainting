@@ -11,6 +11,12 @@ data/**/*.csv
 *.csv
 !requirements*.csv
 
+# Ignoruj JSON files (poza konfiguracją)
+*.json
+!package.json
+!tsconfig.json
+!.vscode/*.json
+
 # Ignoruj pliki LaTeX
 *.tex
 *.aux
