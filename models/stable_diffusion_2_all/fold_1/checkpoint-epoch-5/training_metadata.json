@@ -1,7 +1,0 @@
-{
-  "fold": 1,
-  "epoch": 5,
-  "train_loss": 0.041403887212662895,
-  "val_loss": 0.03193032605785447,
-  "model_id": "stabilityai/stable-diffusion-2-inpainting"
-}
