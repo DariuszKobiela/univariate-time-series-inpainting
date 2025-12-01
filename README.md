@@ -1,3 +1,6 @@
+--
+license: apache-2.0
+--
 # Univariate Time Series Inpainting
 
 Comparison of deep learning image inpainting methods vs traditional imputation for time series forecasting.
