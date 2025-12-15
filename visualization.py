@@ -255,7 +255,7 @@ def create_interactive_app():
             aggregated_data,
             x='fixing_method',
             y=metric,
-            title=f'{aggregation} {metric} for each fixing method - missing rate: {missing_rate_str}, missing type: {missing_type_str}, dataset: {dataset_str}',
+            title=f'Comparison of fixing methods - {aggregation} {metric} - missing rate: {missing_rate_str}, missing type: {missing_type_str}, dataset: {dataset_str}',
             color=metric,
             color_continuous_scale='viridis',
             text=metric
@@ -396,7 +396,7 @@ def create_interactive_app():
                 abs_diff_sorted,
                 x='fixing_method',
                 y='difference',
-                title='Sum of Absolute Differences',
+                title=f'Comparison of sums of absolute differences between original and fixed value for each fixing method- missing rate: {missing_rate_str}, missing type: {missing_type_str}, dataset: {dataset_str}',
                 color='difference',
                 color_continuous_scale='plasma'
             )

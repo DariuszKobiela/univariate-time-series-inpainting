@@ -88,5 +88,11 @@ venv.bak/
 *_old.*
 *_temp.*
 
+# Archive files
+*.tar.gz
+*.tar.bz2
+*.tar.xz
+*.zip
+
 # Zachowaj strukturę folderów (nie ignoruj plików .gitkeep)
 !.gitkeep

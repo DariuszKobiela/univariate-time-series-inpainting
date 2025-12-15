@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
 """
-Fine-tuning Stable Diffusion 2 dla obrazów matematycznych (GAF, MTF, RP, SPEC)
-z cross-validation i early stopping
+Fine-tuning Stable Diffusion 2 for mathematical images (GAF, MTF, RP, SPEC)
+with cross-validation and early stopping
 
-Skrypt ładuje Stable Diffusion 2 z HuggingFace i dotrenowuje go na datasecie 
-wszystkich typów obrazów matematycznych jednocześnie.
+This script loads Stable Diffusion 2 from HuggingFace and fine-tunes it on a dataset
+containing all types of mathematical images simultaneously.
 """
 
 import os
@@ -38,17 +38,17 @@ from diffusers import (
 from transformers import CLIPTextModel, CLIPTokenizer
 from accelerate import Accelerator
 
-# Wyłącz ostrzeżenia
+# Disable warnings
 warnings.filterwarnings("ignore", category=UserWarning)
 warnings.filterwarnings("ignore", category=FutureWarning)
 
-# Ustawienia loggingu
+# Logging settings
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 
 class MathImageInpaintingDataset(Dataset):
-    """Dataset dla inpaintingu obrazów matematycznych"""
+    """Dataset for mathematical image inpainting"""
     
     def __init__(self, 
                  data_dir: str,
@@ -57,21 +57,21 @@ class MathImageInpaintingDataset(Dataset):
                  image_size: int = 512):
         """
         Args:
-            data_dir: ścieżka do folderu z danymi treningowymi
-            indices: lista indeksów próbek do użycia
-            image_types: typy obrazów do treningu
-            image_size: rozmiar obrazów (512 dla Stable Diffusion 2)
+            data_dir: Path to training data folder
+            indices: List of sample indices to use
+            image_types: Image types for training
+            image_size: Image size (512 for Stable Diffusion 2)
         """
         self.data_dir = Path(data_dir)
         self.indices = indices
         self.image_types = image_types
         self.image_size = image_size
         
-        # Ładuj metadane
+        # Load metadata
         with open(self.data_dir / "dataset_summary.json", 'r') as f:
             self.metadata = json.load(f)
         
-        # Stwórz listę wszystkich par obrazów dla podanych indeksów
+        # Create list of all image pairs for given indices
         self.samples = []
         for idx in indices:
             sample_meta = self.metadata["samples"][idx]
@@ -92,30 +92,30 @@ class MathImageInpaintingDataset(Dataset):
     def __getitem__(self, idx):
         sample = self.samples[idx]
         
-        # Ładuj obrazy
+        # Load images
         original_img = Image.open(sample["original_path"]).convert("RGB")
         missing_img = Image.open(sample["missing_path"]).convert("RGB")
         
-        # Zmień rozmiar do 512x512 (dla Stable Diffusion 2)
+        # Resize to 512x512 (for Stable Diffusion 2)
         original_img = original_img.resize((self.image_size, self.image_size), Image.LANCZOS)
         missing_img = missing_img.resize((self.image_size, self.image_size), Image.LANCZOS)
         
-        # Konwertuj na tensor [0, 1]
+        # Convert to tensor [0, 1]
         original_tensor = torch.tensor(np.array(original_img)).permute(2, 0, 1).float() / 255.0
         missing_tensor = torch.tensor(np.array(missing_img)).permute(2, 0, 1).float() / 255.0
         
-        # Stwórz maskę (obszary różniące się między original a missing)
+        # Create mask (areas differing between original and missing)
         mask = torch.abs(original_tensor - missing_tensor).mean(dim=0, keepdim=True)
-        mask = (mask > 0.01).float()  # Próg dla wykrycia różnic
+        mask = (mask > 0.01).float()  # Threshold for detecting differences
         
-        # Rozszerz maskę żeby była bardziej widoczna
+        # Expand mask to make it more visible
         mask = torch.nn.functional.max_pool2d(mask.unsqueeze(0), kernel_size=3, stride=1, padding=1).squeeze(0)
         
-        # Skaluj do [-1, 1] dla Stable Diffusion
+        # Scale to [-1, 1] for Stable Diffusion
         original_tensor = original_tensor * 2.0 - 1.0
         missing_tensor = missing_tensor * 2.0 - 1.0
         
-        # Prompt specyficzny dla typu obrazu
+        # Image type-specific prompt
         prompts = {
             "gaf": "high quality gramian angular field mathematical visualization",
             "mtf": "high quality markov transition field mathematical visualization", 
@@ -133,7 +133,7 @@ class MathImageInpaintingDataset(Dataset):
 
 
 class StableDiffusionTrainer:
-    """Trainer dla fine-tuningu Stable Diffusion 2"""
+    """Trainer for Stable Diffusion 2 fine-tuning"""
     
     def __init__(self, 
                  model_id: str = "stabilityai/stable-diffusion-2-inpainting",
@@ -142,27 +142,27 @@ class StableDiffusionTrainer:
         """
         Args:
             model_id: HuggingFace model ID
-            output_dir: folder wyjściowy
-            mixed_precision: tryb mixed precision (fp16/bf16/no)
+            output_dir: Output folder
+            mixed_precision: Mixed precision mode (fp16/bf16/no)
         """
         self.model_id = model_id
         self.output_dir = Path(output_dir)
         self.output_dir.mkdir(parents=True, exist_ok=True)
         
-        # Accelerator dla optymalizacji
+        # Accelerator for optimization
         self.accelerator = Accelerator(mixed_precision=mixed_precision)
         
-        # Ładuj komponenty modelu
+        # Load model components
         self._load_model_components()
         
-        # Optymalizacje pamięci
+        # Memory optimizations
         self._setup_memory_optimizations()
         
     def _load_model_components(self):
-        """Ładuje komponenty Stable Diffusion 2"""
+        """Loads Stable Diffusion 2 components"""
         logger.info(f"Loading model components from {self.model_id}")
         
-        # Tokenizer i text encoder
+        # Tokenizer and text encoder
         self.tokenizer = CLIPTokenizer.from_pretrained(
             self.model_id, subfolder="tokenizer"
         )
@@ -175,7 +175,7 @@ class StableDiffusionTrainer:
             self.model_id, subfolder="vae"
         )
         
-        # UNet - to będzie trenowane
+        # UNet - this will be trained
         self.unet = UNet2DConditionModel.from_pretrained(
             self.model_id, subfolder="unet"
         )
@@ -185,35 +185,35 @@ class StableDiffusionTrainer:
             self.model_id, subfolder="scheduler"
         )
         
-        # Zamroź wszystko oprócz UNet
+        # Freeze everything except UNet
         self.text_encoder.requires_grad_(False)
         self.vae.requires_grad_(False)
-        self.unet.requires_grad_(True)  # Tylko UNet będzie trenowany
+        self.unet.requires_grad_(True)  # Only UNet will be trained
         
         logger.info("Model components loaded successfully")
     
     def _setup_memory_optimizations(self):
-        """Ustawia optymalizacje pamięci"""
+        """Sets up memory optimizations"""
         if torch.cuda.is_available():
-            # Przenieś komponenty na GPU z optymalizacjami
+            # Move components to GPU with optimizations
             self.vae = self.vae.to(self.accelerator.device)
             self.text_encoder = self.text_encoder.to(self.accelerator.device) 
             self.unet = self.unet.to(self.accelerator.device)
             
-            # Włącz attention slicing (dla diffusers 0.34.0+)
+            # Enable attention slicing (for diffusers 0.34.0+)
             try:
-                # Nowa składnia dla diffusers 0.34.0+
+                # New syntax for diffusers 0.34.0+
                 self.unet.set_attention_slice("auto")
                 logger.info("✅ Attention slicing enabled")
             except Exception as e:
                 try:
-                    # Fallback dla starszych wersji
+                    # Fallback for older versions
                     self.unet.enable_attention_slicing()
                     logger.info("✅ Attention slicing enabled (fallback)")
                 except Exception as e2:
                     logger.warning(f"Could not enable attention slicing: {e}, fallback failed: {e2}")
             
-            # Próbuj włączyć xformers (opcjonalne)
+            # Try to enable xformers (optional)
             try:
                 self.unet.enable_xformers_memory_efficient_attention()
                 logger.info("✅ XFormers memory efficient attention enabled")
@@ -221,7 +221,7 @@ class StableDiffusionTrainer:
                 logger.warning(f"XFormers not available (this is OK): {e}")
                 logger.info("Continuing without XFormers - training will still work")
             
-            # Gradient checkpointing dla oszczędności pamięci
+            # Gradient checkpointing for memory savings
             try:
                 self.unet.enable_gradient_checkpointing()
                 logger.info("✅ Gradient checkpointing enabled")
@@ -231,7 +231,7 @@ class StableDiffusionTrainer:
             logger.info("✅ Memory optimizations setup completed")
     
     def encode_prompt(self, prompts: List[str]) -> torch.Tensor:
-        """Koduje prompty tekstowe"""
+        """Encodes text prompts"""
         tokens = self.tokenizer(
             prompts,
             padding="max_length",
@@ -248,10 +248,10 @@ class StableDiffusionTrainer:
         return encoder_hidden_states
     
     def compute_loss(self, batch):
-        """Oblicza loss dla batcha"""
+        """Computes loss for a batch"""
         device = self.accelerator.device
         
-        # Przenieś batch na device
+        # Move batch to device
         images = batch["image"].to(device)
         masked_images = batch["masked_image"].to(device)
         masks = batch["mask"].to(device)
@@ -297,7 +297,7 @@ class StableDiffusionTrainer:
         return loss
     
     def train_epoch(self, dataloader, optimizer, scaler=None):
-        """Trenuje jeden epoch"""
+        """Trains one epoch"""
         self.unet.train()
         total_loss = 0
         
@@ -325,7 +325,7 @@ class StableDiffusionTrainer:
         return total_loss / len(dataloader)
     
     def validate_epoch(self, dataloader):
-        """Waliduje model"""
+        """Validates the model"""
         self.unet.eval()
         total_loss = 0
         
@@ -337,14 +337,14 @@ class StableDiffusionTrainer:
         return total_loss / len(dataloader)
     
     def save_checkpoint(self, fold: int, epoch: int, train_loss: float, val_loss: float):
-        """Zapisuje checkpoint"""
+        """Saves checkpoint"""
         checkpoint_dir = self.output_dir / f"fold_{fold}" / f"checkpoint-epoch-{epoch}"
         checkpoint_dir.mkdir(parents=True, exist_ok=True)
         
-        # Zapisz UNet
+        # Save UNet
         self.unet.save_pretrained(checkpoint_dir / "unet")
         
-        # Zapisz metadane
+        # Save metadata
         metadata = {
             "fold": fold,
             "epoch": epoch,
@@ -361,11 +361,11 @@ class StableDiffusionTrainer:
         return checkpoint_dir
     
     def save_final_model(self, fold: int):
-        """Zapisuje finalny model po treningu"""
+        """Saves final model after training"""
         final_dir = self.output_dir / f"fold_{fold}" / f"checkpoint-fold_{fold}_final"
         final_dir.mkdir(parents=True, exist_ok=True)
         
-        # Zapisz cały pipeline
+        # Save complete pipeline
         pipeline = StableDiffusionInpaintPipeline(
             vae=self.vae,
             text_encoder=self.text_encoder,
@@ -383,7 +383,7 @@ class StableDiffusionTrainer:
 
 
 class EarlyStopping:
-    """Early stopping dla treningu"""
+    """Early stopping for training"""
     
     def __init__(self, patience: int = 5, min_delta: float = 0.001):
         self.patience = patience
@@ -407,7 +407,7 @@ class EarlyStopping:
 
 
 def set_random_seeds(seed: int = 42):
-    """Ustawia random seedy dla reprodukowalności"""
+    """Sets random seeds for reproducibility"""
     random.seed(seed)
     np.random.seed(seed)
     torch.manual_seed(seed)
@@ -443,7 +443,7 @@ def main():
     
     args = parser.parse_args()
     
-    # Ustawienia
+    # Settings
     set_random_seeds(42)
     
     logger.info("🚀 STARTING STABLE DIFFUSION 2 FINE-TUNING")
@@ -456,7 +456,7 @@ def main():
     logger.info(f"📈 Training runs: {args.n_folds}")
     logger.info(f"📊 Train/Val split: {args.train_ratio:.0%}/{1-args.train_ratio:.0%}")
     
-    # Sprawdź dostępność CUDA
+    # Check CUDA availability
     if not torch.cuda.is_available():
         logger.error("CUDA is not available! This script requires GPU.")
         sys.exit(1)
@@ -464,7 +464,7 @@ def main():
     logger.info(f"🔧 GPU: {torch.cuda.get_device_name()}")
     logger.info(f"💾 GPU Memory: {torch.cuda.get_device_properties(0).total_memory / 1024**3:.1f} GB")
     
-    # Ładuj dataset metadata
+    # Load dataset metadata
     data_dir = Path(args.data_dir)
     with open(data_dir / "dataset_summary.json", 'r') as f:
         metadata = json.load(f)
@@ -472,26 +472,26 @@ def main():
     total_samples = metadata["total_samples"]
     logger.info(f"📚 Total samples in dataset: {total_samples}")
     
-    # Określ które próbki użyć (ograniczone przez max_samples PER FOLD)
-    # max_samples oznacza liczbę pairs do trenowania w każdym fold
-    # Każda próbka ma 4 typy obrazów, więc max_samples // 4 = base samples per fold
+    # Determine which samples to use (limited by max_samples PER FOLD)
+    # max_samples means number of pairs to train in each fold
+    # Each sample has 4 image types, so max_samples // 4 = base samples per fold
     
-    # Train/validation split ratio (konfigurowalne przez --train_ratio)
+    # Train/validation split ratio (configurable via --train_ratio)
     train_ratio = args.train_ratio
     base_samples_per_fold = args.max_samples // 4
     
-    # Oblicz łączną liczbę base samples potrzebną (teraz train_ratio to rzeczywisty % na training)
+    # Calculate total base samples needed (train_ratio is now actual % for training)
     total_base_samples_needed = int(base_samples_per_fold / train_ratio)
     max_base_samples = min(total_base_samples_needed, total_samples)
     
-    # Walidacja czy mamy wystarczająco danych
+    # Validate if we have enough data
     actual_train_pairs_per_fold = int(max_base_samples * train_ratio * 4)
     actual_val_pairs_per_fold = int(max_base_samples * (1 - train_ratio) * 4)
     
     if total_base_samples_needed > total_samples:
-        logger.warning(f"⚠️ Dataset ma tylko {total_samples} base samples ({total_samples * 4} pairs)")
-        logger.warning(f"⚠️ Dla {args.max_samples} pairs per fold potrzeba {total_base_samples_needed} base samples")
-        logger.warning(f"⚠️ Zmniejszam do dostępnych danych: {actual_train_pairs_per_fold} pairs per fold")
+        logger.warning(f"⚠️ Dataset has only {total_samples} base samples ({total_samples * 4} pairs)")
+        logger.warning(f"⚠️ For {args.max_samples} pairs per fold, {total_base_samples_needed} base samples needed")
+        logger.warning(f"⚠️ Reducing to available data: {actual_train_pairs_per_fold} pairs per fold")
     
     sample_indices = list(range(max_base_samples))
     logger.info(f"🎯 Target: {args.max_samples} training pairs per fold")
@@ -499,16 +499,16 @@ def main():
     logger.info(f"📊 Split ratio: {train_ratio:.0%} train / {1-train_ratio:.0%} validation")
     logger.info(f"📊 Actual per fold: {actual_train_pairs_per_fold} training pairs + {actual_val_pairs_per_fold} validation pairs")
     
-    # Informacje o pamięci
+    # Memory information
     logger.info("\n🔧 MEMORY MANAGEMENT SETTINGS")
     logger.info(f"Mixed precision: {args.mixed_precision}")
     logger.info(f"Gradient accumulation steps: {args.gradient_accumulation_steps}")
     logger.info("Additional optimizations: attention slicing, gradient checkpointing")
     
-    # Wyniki treningu
+    # Training results
     fold_results = []
     
-    # Training loop (możliwość wielokrotnego trenowania z różnymi seed'ami)
+    # Training loop (multiple training runs with different seeds)
     for fold in range(args.n_folds):
         if args.resume_fold is not None and fold < args.resume_fold:
             logger.info(f"⏭️ Skipping fold {fold + 1} (resuming from fold {args.resume_fold + 1})")
@@ -517,18 +517,18 @@ def main():
         logger.info(f"\n🔄 TRAINING RUN {fold + 1}/{args.n_folds}")
         logger.info("=" * 40)
         
-        # Podział na train/validation z custom ratio (np. 80/20)
+        # Split into train/validation with custom ratio (e.g. 80/20)
         train_sample_indices, val_sample_indices = train_test_split(
             sample_indices, 
             train_size=train_ratio,
-            random_state=42 + fold,  # Różne seed dla każdego run'a
+            random_state=42 + fold,  # Different seed for each run
             shuffle=True
         )
         
         logger.info(f"📊 Train samples: {len(train_sample_indices)} ({len(train_sample_indices) * 4} pairs)")
         logger.info(f"📊 Val samples: {len(val_sample_indices)} ({len(val_sample_indices) * 4} pairs)")
         
-        # Stwórz datasets
+        # Create datasets
         train_dataset = MathImageInpaintingDataset(
             data_dir=args.data_dir,
             indices=train_sample_indices
@@ -538,7 +538,7 @@ def main():
             indices=val_sample_indices
         )
         
-        # Stwórz dataloaders
+        # Create dataloaders
         train_loader = DataLoader(
             train_dataset,
             batch_size=args.batch_size,
@@ -554,7 +554,7 @@ def main():
             pin_memory=True
         )
         
-        # Stwórz trainer
+        # Create trainer
         trainer = StableDiffusionTrainer(
             output_dir=args.output_dir,
             mixed_precision=args.mixed_precision
@@ -567,13 +567,13 @@ def main():
             weight_decay=0.01
         )
         
-        # Scaler dla mixed precision
+        # Scaler for mixed precision
         scaler = GradScaler() if args.mixed_precision == "fp16" else None
         
         # Early stopping
         early_stopping = EarlyStopping(patience=args.early_stop_patience)
         
-        # Training loop dla tego fold
+        # Training loop for this fold
         best_val_loss = float('inf')
         train_losses = []
         val_losses = []
@@ -584,11 +584,11 @@ def main():
             print(f"\n📅 FOLD {fold + 1}/{args.n_folds} - EPOCH {epoch + 1}/{args.max_epochs}")
             print("-" * 60)
             
-            # Trenuj epoch
+            # Train epoch
             print(f"🏃 Training epoch {epoch + 1}...")
             train_loss = trainer.train_epoch(train_loader, optimizer, scaler)
             
-            # Waliduj epoch  
+            # Validate epoch  
             print(f"🔍 Validating epoch {epoch + 1}...")
             val_loss = trainer.validate_epoch(val_loader)
             
@@ -599,7 +599,7 @@ def main():
             print(f"   📈 Train Loss: {train_loss:.6f}")
             print(f"   📉 Val Loss: {val_loss:.6f}")
             
-            # Zapisz checkpoint jeśli val loss się poprawił
+            # Save checkpoint if val loss improved
             if val_loss < best_val_loss:
                 best_val_loss = val_loss
                 trainer.save_checkpoint(fold + 1, epoch + 1, train_loss, val_loss)
@@ -610,10 +610,10 @@ def main():
                 logger.info(f"🛑 Early stopping triggered at epoch {epoch + 1}")
                 break
         
-        # Zapisz final model dla tego fold
+        # Save final model for this fold
         final_model_path = trainer.save_final_model(fold + 1)
         
-        # Zapisz wyniki fold
+        # Save fold results
         fold_result = {
             "fold": fold + 1,
             "best_val_loss": best_val_loss,
@@ -625,15 +625,15 @@ def main():
         
         logger.info(f"✅ Fold {fold + 1} completed. Best val loss: {best_val_loss:.6f}")
         
-        # Wyczyść pamięć GPU
+        # Clear GPU memory
         torch.cuda.empty_cache()
     
-    # Zapisz wyniki wszystkich folds
+    # Save results from all folds
     results_file = Path(args.output_dir) / "cross_validation_results.json"
     with open(results_file, 'w') as f:
         json.dump(fold_results, f, indent=2)
     
-    # Podsumowanie
+    # Summary
     logger.info(f"\n🎉 CROSS-VALIDATION COMPLETED!")
     logger.info("=" * 50)
     
@@ -645,18 +645,18 @@ def main():
     logger.info(f"📁 Results saved to: {results_file}")
     logger.info(f"📁 Models saved in: {args.output_dir}")
     
-    # Znajdź najlepszy fold
+    # Find best fold
     best_fold_idx = np.argmin(val_losses)
     best_fold = fold_results[best_fold_idx]
     logger.info(f"🏆 Best fold: {best_fold['fold']} (val_loss: {best_fold['best_val_loss']:.6f})")
     logger.info(f"🏆 Best model: {best_fold['model_path']}")
     
-    # Stwórz symboliczny link do najlepszego modelu  
+    # Create symbolic link to best model  
     best_model_link = Path(args.output_dir) / "best_model"
     if best_model_link.exists():
         best_model_link.unlink()
     
-    # Stwórz relatywną ścieżkę do najlepszego modelu
+    # Create relative path to best model
     relative_path = Path(best_fold['model_path']).relative_to(Path(args.output_dir))
     best_model_link.symlink_to(relative_path)
     logger.info(f"🔗 Best model linked as: {best_model_link} -> {relative_path}")

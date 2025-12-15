@@ -13,9 +13,10 @@ def train_tcn(train_series: pd.Series, horizon: int, input_chunk_length: int = T
     """
     
     # 1. Darts requires a TimeSeries object. We create a dummy index with
-    #    a monthly frequency to stay within pandas' valid date bounds.
-    date_index = pd.date_range(start='2000', periods=len(train_series), freq='M')
-    full_ts = TimeSeries.from_times_and_values(times=date_index, values=train_series.values, freq='M')
+    #    hourly frequency to stay within pandas' valid date bounds.
+    #    Using 'H' (hourly) instead of 'M' (monthly) to avoid overflow for long series.
+    date_index = pd.date_range(start='2000-01-01', periods=len(train_series), freq='H')
+    full_ts = TimeSeries.from_times_and_values(times=date_index, values=train_series.values, freq='H')
     
     # Split the series into training and validation sets.
     # The last 20% of the data will be used for validation.
