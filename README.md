@@ -169,5 +169,20 @@ tail -f experiment.log
    - Check `results/quick_experiment/df_final.csv` anytime
    - Results persist even if experiment crashes
 
+Inne modele inpaintingowe do pobrania:
 
+1. Diffusion-based image inpainting (SOTA)
+- RePaint - Inpainting using Denoising Diffusion Probabilistic Models: https://github.com/andreas128/RePaint [WYBRANY DO EKSPERYMENTOW]
+- LaMa: Resolution-robust Large Mask Inpainting with Fourier Convolutions: https://github.com/advimman/lama [WYBRANY DO EKSPERYMENTOW]
 
+2. Mask-aware Transformers:
+- MAT: Mask-Aware Transformer for Large Hole Image Inpainting: https://github.com/fenglinglwb/MAT [WYBRANY DO EKSPERYMENTOW]
+- ZITS: Incremental Transformer Structure Enhanced Image Inpainting with Masking Positional Encoding: https://github.com/DQiaole/ZITS_inpainting [WYBRANY DO EKSPERYMENTOW]
+
+3. PConv-style:
+- NVIDIA Partial Convolution Layer for Padding and Image Inpainting: https://github.com/NVIDIA/partialconv [WYBRANY DO EKSPERYMENTOW]
+- PyTorch Partial Convolution Inpainting: https://github.com/tanimutomo/partialconv [tego nie używamy, prostsza wersja NVIDII]
+
+4. CNN / GAN:
+- DeepFill v2 (Contextual Attention) - Generative Image Inpainting:  https://github.com/JiahuiYu/generative_inpainting [WYBRANY DO EKSPERYMENTOW]
+- EdgeConnect - Generative Image Inpainting with Adversarial Edge Learning: https://github.com/knazeri/edge-connect [WYBRANY DO EKSPERYMENTOW]

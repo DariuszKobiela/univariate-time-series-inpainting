@@ -45,6 +45,13 @@ from models.sarimax import train_sarimax
 from models.holt_winters import train_holt_winters
 from models.temporal_convolutional_network import train_tcn
 from models.exponential_smoothing import train_holt_winters as train_exponential_smoothing  # Use the HW function
+
+# Import new deep learning models
+from models.rnn_model import train_lstm, train_gru
+from models.nbeats_model import train_nbeats, train_nbeats_interpretable
+from models.transformer_model import train_tft, train_transformer
+from models.deepar_model import train_deepar, train_deepar_quantile
+
 from ts_image_inpainting import process_series, ENCODERS, INPAINTERS, INVERTERS
 
 class IterativeExperiment:
@@ -474,6 +481,23 @@ class IterativeExperiment:
                 forecast = train_tcn(train_data, n_points)
             elif model_name == "ExponentialSmoothing":
                 forecast = train_exponential_smoothing(train_data, n_points)
+            # New deep learning models
+            elif model_name == "LSTM":
+                forecast = train_lstm(train_data, n_points)
+            elif model_name == "GRU":
+                forecast = train_gru(train_data, n_points)
+            elif model_name == "NBEATS":
+                forecast = train_nbeats(train_data, n_points)
+            elif model_name == "NBEATS-I":  # Interpretable N-BEATS
+                forecast = train_nbeats_interpretable(train_data, n_points)
+            elif model_name == "TFT":
+                forecast = train_tft(train_data, n_points)
+            elif model_name == "Transformer":
+                forecast = train_transformer(train_data, n_points)
+            elif model_name == "DeepAR":
+                forecast = train_deepar(train_data, n_points)
+            elif model_name == "DeepAR-Q":  # DeepAR with Quantile Regression
+                forecast = train_deepar_quantile(train_data, n_points)
             else:
                 raise ValueError(f"Unknown forecasting model: {model_name}")
             
