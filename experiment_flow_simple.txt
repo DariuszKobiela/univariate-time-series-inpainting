@@ -1,0 +1,44 @@
+┌─────────────────────────────────────────────────────────────┐
+│              EXPERIMENT MODULE DEPENDENCIES                │
+└─────────────────────────────────────────────────────────────┘
+
+                    ┌──────────────┐
+                    │ Run Experiment│
+                    └───────┬───────┘
+                            │
+                            │ calls
+                            ▼
+                    ┌──────────────────┐
+                    │Iterative Experiment│
+                    └───────┬──────────┘
+                            │
+                ┌───────────┴───────────┐
+                │                       │
+                │ uses                  │ uses
+                ▼                       ▼
+        ┌──────────────┐      ┌──────────────┐
+        │  Inpainting  │      │ Visualization│
+        └──────────────┘      └──────────────┘
+
+┌─────────────────────────────────────────────────────────────┐
+│                      DETAILED FLOW                          │
+└─────────────────────────────────────────────────────────────┘
+
+Run Experiment
+    │
+    │ (creates & configures)
+    ▼
+Iterative Experiment
+    │
+    │ (for image-based repair)
+    ├──► Inpainting
+    │    • Encode: Time Series → Image
+    │    • Repair: Image Inpainting
+    │    • Decode: Image → Time Series
+    │
+    │ (for results presentation)
+    └──► Visualization
+         • Performance plots
+         • Statistical charts
+         • ANOVA visualizations
+

@@ -1,0 +1,85 @@
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                    EXPERIMENT ARCHITECTURE DIAGRAM                           │
+└─────────────────────────────────────────────────────────────────────────────┘
+
+                    ┌──────────────────────┐
+                    │   Run Experiment     │
+                    │ (Entry Point / CLI)  │
+                    └──────────┬───────────┘
+                               │
+                               │ orchestrates
+                               ▼
+                    ┌──────────────────────┐
+                    │ Iterative Experiment │
+                    │  (Core Logic /       │
+                    │   Workflow Manager)  │
+                    └──────┬───────────┬───┘
+                           │           │
+                           │ uses      │ uses
+                           ▼           ▼
+            ┌───────────────────┐  ┌──────────────┐
+            │    Inpainting      │  │ Visualization│
+            │  (Image Repair     │  │  (Plots &    │
+            │   Algorithms)      │  │   Charts)    │
+            └────────────────────┘  └──────────────┘
+
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                              DATA FLOW                                      │
+└─────────────────────────────────────────────────────────────────────────────┘
+
+Run Experiment
+    │
+    ├─► Creates IterativeExperiment instance
+    │
+    └─► Iterative Experiment
+            │
+            ├─► Phase 1: Generate missing data
+            │
+            ├─► Phase 2: Repair data
+            │       │
+            │       └─► Inpainting (for image-based methods)
+            │           • Encoders (GAF, MTF, RP, Spectrogram)
+            │           • Inpainters (UNet, SD2)
+            │           • Inverters (back to time series)
+            │
+            ├─► Phase 3: Forecasting
+            │
+            ├─► Phase 4: Baseline forecasting
+            │
+            └─► Visualization
+                    • Performance plots
+                    • Statistical test charts
+                    • ANOVA visualizations
+
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                         MODULE RESPONSIBILITIES                             │
+└─────────────────────────────────────────────────────────────────────────────┘
+
+Run Experiment:
+  • CLI interface
+  • Experiment presets (quick/medium/full)
+  • Parameter parsing
+  • Results summary
+
+Iterative Experiment:
+  • Experiment orchestration
+  • Data loading & splitting
+  • Missingness generation
+  • Repair method application
+  • Forecasting coordination
+  • Metrics calculation
+  • Statistical testing
+  • Results aggregation
+
+Inpainting:
+  • Time series → Image encoding (GAF, MTF, RP, Spectrogram)
+  • Image inpainting (UNet, Stable Diffusion 2)
+  • Image → Time series decoding
+  • Low-level image processing
+
+Visualization:
+  • Performance bar charts
+  • Statistical test plots
+  • ANOVA visualizations
+  • Comparison charts
+
