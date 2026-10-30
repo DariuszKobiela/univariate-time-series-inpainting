@@ -1,61 +1,37 @@
-# Ignoruj wszystkie pliki PNG
-*.png
-
-# Ignoruj również pliki PNG w podfolderach
-**/*.png
-
-# Ignoruj pliki CSV z folderu data/ i jego podfolderów
-data/**/*.csv
-
-# Ignoruj CSV files z wynikami (poza wybranymi backupami)
-*.csv
-!requirements*.csv
-
-# Ignoruj JSON files (poza konfiguracją)
-*.json
-!package.json
-!tsconfig.json
-!.vscode/*.json
-
-# Ignoruj pliki LaTeX
-*.tex
-*.aux
-*.log
-*.out
-*.toc
-*.bbl
-*.blg
-*.synctex.gz
-*.fdb_latexmk
-*.fls
-
-# Ignoruj pliki cache i tymczasowe pliki Python
+# Python
 __pycache__/
-*.pyc
-*.pyo
-*.pyd
+*.py[cod]
+*$py.class
 *.so
 .Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
 
-# Ignoruj duże pliki modeli (dodaj konkretne rozszerzenia jeśli potrzebne)
-models/**/*.safetensors
-models/**/*.bin
-models/**/*.ckpt
-models/**/*.pt
-models/**/*.pth
-models/**/*.json
-models/**/*.txt
-models/**/*.log
-models/**/*.log.gz
-models/**/*.log.tar.gz
-models/**/*.log.tar.bz2
-models/**/*.log.tar.xz
-models/**/*.log.tar.lzma
-models/**/*.log.tar.lz4
-models/**/*.log.tar.zstd
-models/**/*.log.tar.zstd
+# Virtual environments
+venv/
+env/
+ENV/
+env.bak/
+venv.bak/
+.venv/
+experiment/
+experiments/
 
-# IDE i edytory
+# IDEs
 .vscode/
 .idea/
 *.swp
@@ -64,35 +40,107 @@ models/**/*.log.tar.zstd
 .DS_Store
 
 # Jupyter Notebook
-.ipynb_checkpoints/
+.ipynb_checkpoints
 *.ipynb
 
-# Pytest
-.pytest_cache/
-.coverage
-htmlcov/
+# Cursor files
+.cursor/
 
-# Environments
-.env
-.venv
-env/
-venv/
-ENV/
-env.bak/
-venv.bak/
+# CSV files
+*.csv
 
-# Backup files
+# PARQUET files
+*.parquet
+
+# JSON files
+*.json
+
+# PNG files
+*.png
+
+# NumPy arrays
+*.npy
+
+# tar.gz files
+*.tar.gz
+
+# Generated data directories - ignore all CSV files
+data/0_source_data/*.csv
+data/1_cleaned_data/*.csv
+data/1_5_horizon_recommendation/*.json
+data/1_5_horizon_recommendation/*.csv
+data/1_5_horizon_recommendation/*.md
+data/2_splitted_data/train/*.csv
+data/2_splitted_data/sd2_validation/*.csv
+data/2_splitted_data/test/*.csv
+data/2_splitted_data/split_manifest.json
+data/3_missing_data/*.csv
+data/4_fixed_data/**/*.csv
+data/4_fixed_data/*.csv
+
+# Experiment results - ignore all CSV files
+reconstruction_experiments_results/*.csv
+reconstruction_experiments_results/performance_metrics/*.csv
+prediction_experiment_results/*.csv
+prediction_experiment_results/predictions/*.csv
+prediction_experiment_results/performance_metrics/*.csv
+prediction_experiment_results/prediction_results_*.csv
+prediction_experiment_results/training_metrics_*.csv
+
+# Trained prediction models - ignore model files
+trained_prediction_models/*.pt
+trained_prediction_models/*.pkl
+trained_prediction_models/*.ckpt
+trained_prediction_models/**/*.ckpt
+!trained_prediction_models/.gitkeep
+
+# UV lock file is tracked for reproducibility
+
+# Checkpoint files
+*.ckpt
+*.pth.tar
+*.safetensors
+hyperparameter_optimization/*.csv
+hyperparameter_optimization/*.txt
+
+# Keep directory structure (only .gitkeep files)
+!config/.gitkeep
+!data/0_source_data/.gitkeep
+!data/1_cleaned_data/.gitkeep
+!data/1_5_horizon_recommendation/.gitkeep
+!data/2_splitted_data/.gitkeep
+!data/2_splitted_data/train/.gitkeep
+!data/2_splitted_data/sd2_validation/.gitkeep
+!data/2_splitted_data/test/.gitkeep
+!data/3_missing_data/.gitkeep
+!data/4_fixed_data/.gitkeep
+!reconstruction_experiments_results/.gitkeep
+!reconstruction_experiments_results/performance_metrics/.gitkeep
+!prediction_experiment_results/.gitkeep
+!prediction_experiment_results/predictions/.gitkeep
+!prediction_experiment_results/performance_metrics/.gitkeep
+!hyperparameter_optimization/.gitkeep
+
+# Model cache
+.cache/
+models_cache/
+.huggingface/
+release/huggingface/
+
+# Logs
+*.log
+logs/
+LG/
+
+# Temporary files
+*.tmp
+*.temp
+.tmp/
+
+# OS specific
+Thumbs.db
+
+# Local backup files
 *.bak
 *.backup
-*_backup.*
-*_old.*
-*_temp.*
-
-# Archive files
-*.tar.gz
-*.tar.bz2
-*.tar.xz
-*.zip
-
-# Zachowaj strukturę folderów (nie ignoruj plików .gitkeep)
-!.gitkeep
+*.orig

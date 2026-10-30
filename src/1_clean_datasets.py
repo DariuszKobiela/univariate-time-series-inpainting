@@ -1,0 +1,340 @@
+"""
+Data Cleaning Script
+
+This script loads raw datasets from data/0_source_data, cleans and validates them,
+then saves the cleaned versions to data/1_cleaned_data.
+
+Cleaning operations:
+- Validates and converts index to datetime or numeric format
+- Converts value columns to numeric (float)
+- Handles different CSV formats (separator, decimal point)
+- Removes duplicate indices
+- Fills source missing values from the previous observation (forward fill)
+- Reports filled values and removes leading gaps that cannot be forward-filled
+- Standardizes output format
+
+Usage:
+    python clean_datasets.py [--input-dir DIR] [--output-dir DIR] [--dataset FILENAME]
+
+Examples:
+    # Clean all datasets from default directories
+    python clean_datasets.py
+
+    # Clean specific dataset
+    python clean_datasets.py --dataset vibration_sensor_S1.csv
+
+    # Clean from custom directories
+    python clean_datasets.py --input-dir data/0_source_data --output-dir data/1_cleaned_data
+"""
+
+import os
+import sys
+
+# Add src directory to path for imports
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+
+from utils.logger import setup_logging
+
+# Setup automatic logging to file
+setup_logging("1_clean_datasets")
+import argparse
+import pandas as pd
+import numpy as np
+from pathlib import Path
+from datetime import datetime
+
+# Add src directory to path for imports
+sys.path.insert(0, str(Path(__file__).parent))
+
+from utils.config_loader import load_config
+from utils.progress import tqdm
+
+
+def detect_csv_format(file_path: str) -> dict:
+    """
+    Detect CSV format by reading first few lines.
+    
+    Args:
+        file_path: Path to CSV file
+        
+    Returns:
+        Dictionary with pandas read_csv parameters
+    """
+    # Try common formats
+    formats = [
+        {'sep': ',', 'decimal': '.'},  # Standard format
+        {'sep': ';', 'decimal': ','},  # European format
+        {'sep': ';', 'decimal': '.'},  # Semicolon with dot
+        {'sep': ',', 'decimal': ','},  # Comma with comma (rare)
+    ]
+    
+    for fmt in formats:
+        try:
+            df = pd.read_csv(file_path, nrows=5, **fmt)
+            if len(df.columns) >= 2 and len(df) > 0:
+                # Check if we can convert at least one value to float
+                for col in df.columns[1:]:  # Skip first column (index)
+                    try:
+                        pd.to_numeric(df[col].iloc[0])
+                        return fmt
+                    except (ValueError, TypeError):
+                        continue
+        except Exception:
+            continue
+    
+    # Default to standard format
+    return {'sep': ',', 'decimal': '.'}
+
+
+def clean_index(index_series: pd.Series) -> pd.Index:
+    """
+    Clean and convert index to appropriate type.
+    
+    Args:
+        index_series: Raw index series
+        
+    Returns:
+        Cleaned pandas Index (datetime, numeric, or string)
+    """
+    # Try datetime first
+    try:
+        return pd.to_datetime(index_series)
+    except (ValueError, TypeError, pd.errors.ParserError):
+        pass
+    
+    # Try numeric
+    try:
+        numeric_index = pd.to_numeric(index_series, errors='coerce')
+        if numeric_index.notna().all():
+            return pd.Index(numeric_index)
+    except (ValueError, TypeError):
+        pass
+    
+    # Keep as string if both conversions fail
+    return pd.Index(index_series.astype(str))
+
+
+def clean_dataset(input_file: str, output_file: str, config) -> dict | None:
+    """
+    Clean a single dataset.
+    
+    Args:
+        input_file: Path to input CSV file
+        output_file: Path to output CSV file
+        config: Configuration object
+    """
+    print(f"\n📂 Cleaning: {os.path.basename(input_file)}")
+    
+    # Check if output file already exists
+    if os.path.exists(output_file) and not config.get_overwrite_existing():
+        print(f"  ⏭️  Skipping (file already exists, overwrite_existing=false)")
+        return None
+    
+    # Detect CSV format
+    csv_format = detect_csv_format(input_file)
+    print(f"  📋 Detected format: sep='{csv_format['sep']}', decimal='{csv_format['decimal']}'")
+    
+    # Load dataset
+    try:
+        df = pd.read_csv(input_file, **csv_format)
+    except Exception as e:
+        print(f"  ❌ Error reading file: {e}")
+        return
+    
+    if len(df.columns) < 2:
+        print(f"  ❌ Error: Dataset must have at least 2 columns (index + values)")
+        return
+    
+    original_rows = len(df)
+    print(f"  📊 Original rows: {original_rows}")
+    
+    # Set first column as index
+    df.set_index(df.columns[0], inplace=True)
+    
+    # Clean index
+    try:
+        df.index = clean_index(df.index.to_series())
+        print(f"  🔢 Index type: {df.index.dtype}")
+    except Exception as e:
+        print(f"  ⚠️  Warning: Could not convert index: {e}")
+    
+    # Convert value columns to numeric
+    for col in df.columns:
+        try:
+            df[col] = pd.to_numeric(df[col], errors='coerce')
+        except Exception as e:
+            print(f"  ⚠️  Warning: Could not convert column '{col}' to numeric: {e}")
+    
+    # Establish chronological order before using the previous observation.
+    if df.index.duplicated().any():
+        n_duplicates = int(df.index.duplicated().sum())
+        print(f"  🔄 Removing {n_duplicates} duplicate indices")
+        df = df[~df.index.duplicated(keep="first")]
+    try:
+        df.sort_index(inplace=True)
+    except TypeError:
+        pass
+
+    # Complete source data before the experimental degradation step.
+    missing_by_column = df.isna().sum()
+    missing_before = int(missing_by_column.sum())
+    if missing_before:
+        df.ffill(inplace=True)
+        missing_after_ffill = int(df.isna().sum().sum())
+        filled_count = missing_before - missing_after_ffill
+        print(f"  🩹 Missing source values detected: {missing_before}")
+        print(f"  ✅ Forward-filled from previous observations: {filled_count}")
+        for column, count in missing_by_column[missing_by_column > 0].items():
+            print(f"     - {column}: {int(count)} missing before ffill")
+    else:
+        filled_count = 0
+        print("  ✅ Missing source values detected: 0")
+
+    # A leading gap has no previous observation and cannot be forward-filled.
+    unresolved_rows = int(df.isna().any(axis=1).sum())
+    if unresolved_rows:
+        print(f"  ⚠️  Removing {unresolved_rows} leading row(s) that cannot be forward-filled")
+        df.dropna(how="any", inplace=True)
+
+    # Remove rows where all value columns are NaN
+    df.dropna(how='all', inplace=True)
+    
+    # Remove duplicate indices (keep first occurrence)
+    if df.index.duplicated().any():
+        n_duplicates = df.index.duplicated().sum()
+        print(f"  🔄 Removing {n_duplicates} duplicate indices")
+        df = df[~df.index.duplicated(keep='first')]
+    
+    # Sort by index
+    try:
+        df.sort_index(inplace=True)
+    except TypeError:
+        # If index is not sortable, keep original order
+        pass
+    
+    final_rows = len(df)
+    print(f"  📊 Final rows: {final_rows} ({final_rows - original_rows:+d})")
+    
+    # Save cleaned dataset (standardized format: comma separator, dot decimal)
+    os.makedirs(os.path.dirname(output_file), exist_ok=True)
+    df.to_csv(output_file, sep=',', decimal='.')
+    print(f"  ✅ Saved to: {output_file}")
+    return {
+        "dataset": os.path.basename(input_file),
+        "original_rows": original_rows,
+        "final_rows": final_rows,
+        "missing_values_before": missing_before,
+        "values_forward_filled": filled_count,
+        "unresolved_rows_removed": unresolved_rows,
+    }
+
+
+def run_clean_datasets(
+    config,
+    input_dir: str | None = None,
+    output_dir: str | None = None,
+    dataset: str | None = None,
+) -> bool:
+    """
+    Step 1: clean raw CSVs into cleaned_dir. Returns False if the step aborted early (fatal setup).
+    """
+    input_dir = input_dir or config.get_raw_source_dir()
+    output_dir = output_dir or config.get_cleaned_dir()
+
+    print(f"\n{'='*60}")
+    print(f"🧹 DATA CLEANING PIPELINE")
+    print(f"{'='*60}")
+    print(f"Input directory:  {input_dir}")
+    print(f"Output directory: {output_dir}")
+
+    if dataset:
+        datasets = [dataset]
+    else:
+        if not os.path.exists(input_dir):
+            print(f"\n❌ Error: Input directory does not exist: {input_dir}")
+            return False
+
+        datasets = [f for f in os.listdir(input_dir) if f.endswith('.csv')]
+
+    if not datasets:
+        print(f"\n⚠️  No CSV files found in {input_dir}")
+        return False
+
+    print(f"\n📋 Found {len(datasets)} dataset(s) to clean")
+
+    success_count = 0
+    reports = []
+    for ds in tqdm(datasets, desc="Cleaning datasets", unit="file"):
+        input_file = os.path.join(input_dir, ds)
+        output_file = os.path.join(output_dir, ds)
+
+        try:
+            report = clean_dataset(input_file, output_file, config)
+            if report is not None:
+                reports.append(report)
+            success_count += 1
+        except Exception as e:
+            print(f"\n❌ Error cleaning {ds}: {e}")
+            import traceback
+            traceback.print_exc()
+
+    if reports:
+        report_dir = Path(output_dir) / "reports"
+        report_dir.mkdir(parents=True, exist_ok=True)
+        report_path = report_dir / "cleaning_report.csv"
+        pd.DataFrame(reports).to_csv(report_path, index=False)
+        print(f"📄 Cleaning report: {report_path}")
+
+    print(f"\n{'='*60}")
+    print(f"✅ Cleaning complete: {success_count}/{len(datasets)} datasets cleaned successfully")
+    print(f"{'='*60}\n")
+    return True
+
+
+def main():
+    """Main execution function."""
+    parser = argparse.ArgumentParser(
+        description="Clean raw datasets and save to cleaned data directory"
+    )
+    parser.add_argument(
+        '--config',
+        type=str,
+        default='config/config.yaml',
+        help='Path to configuration file (default: config/config.yaml)',
+    )
+    parser.add_argument(
+        '--input-dir',
+        type=str,
+        help='Input directory containing raw datasets (default: from config/config.yaml)'
+    )
+    parser.add_argument(
+        '--output-dir',
+        type=str,
+        help='Output directory for cleaned datasets (default: data/1_cleaned_data)'
+    )
+    parser.add_argument(
+        '--dataset',
+        type=str,
+        help='Specific dataset filename to clean (default: all datasets)'
+    )
+
+    args = parser.parse_args()
+
+    try:
+        config = load_config(args.config)
+        print(f"✓ Loaded configuration from: {args.config}\n")
+    except FileNotFoundError:
+        print(f"❌ Configuration file not found: {args.config}")
+        return
+
+    run_clean_datasets(
+        config,
+        input_dir=args.input_dir,
+        output_dir=args.output_dir,
+        dataset=args.dataset,
+    )
+
+
+if __name__ == "__main__":
+    main()
+

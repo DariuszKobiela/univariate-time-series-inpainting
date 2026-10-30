@@ -1,0 +1,305 @@
+# Time Series Reconstruction & Prediction Framework - Configuration File
+# Framework: uniTS-MissRecoPred
+
+# ============================================================================
+# DATA DIRECTORIES
+# ============================================================================
+data:
+  raw_source_dir: "data/0_source_data"       # Directory with raw datasets (input)
+  cleaned_dir: "data/1_cleaned_data"         # Directory with cleaned datasets
+  horizon_dir: "data/1_5_horizon_recommendation"  # Horizon metadata and reports (step 1.5)
+  splitted_dir: "data/2_splitted_data"       # Directory with train/test split data
+  splitted_train_dir: "data/2_splitted_data/train"  # Reconstruction train (degradation)
+  splitted_sd2_validation_dir: "data/2_splitted_data/sd2_validation"  # SD2 HPO only
+  splitted_test_dir: "data/2_splitted_data/test"    # Rolling-origin final evaluation
+  split_manifest_path: "data/2_splitted_data/split_manifest.json"
+  source_dir: "data/2_splitted_data/train"   # Directory with source datasets for degradation (training data)
+  missing_dir: "data/3_missing_data"         # Directory for degraded datasets
+  fixed_dir: "data/4_fixed_data"             # Directory for reconstructed datasets
+  reconstruction_results_dir: "reconstruction_experiments_results"  # Directory for reconstruction experiment results
+  prediction_results_dir: "prediction_experiment_results"  # Directory for prediction experiment results
+
+# ============================================================================
+# ============================================================================
+# TRAIN/TEST SPLIT SETTINGS
+# ============================================================================
+split:
+  # Fallback when dataset_metadata.json is missing or has no entry for a series.
+  # Step 2 prefers per-series h_long from analyze_forecast_horizons (step 1.5).
+  test_samples: 30
+
+  # SD2 validation block (deterministic tail of reconstruction region, never in final eval)
+  # 4096 supports honest comparison of 512/1024/2048-sample HPO windows.
+  sd2_validation:
+    share: 0.10
+    min_samples: 64
+    max_samples: 4096
+
+  # Wyjątki tylko dla serii, które nie mogą spełnić globalnych minimów.
+  # vibration: 144 reconstruction + 24 validation + 42 rolling test = 210.
+  dataset_overrides:
+    vibration_sensor_S1.csv:
+      min_reconstruction_length: 144
+      sd2_validation:
+        min_samples: 24
+        max_samples: 24
+
+  # Horizon recommendation (2_analyze_forecast_horizons.py → 1_5_horizon_recommendation/)
+  horizons:
+    metadata_path: "data/1_5_horizon_recommendation/dataset_metadata.json"
+    report_csv_path: "data/1_5_horizon_recommendation/horizon_recommendations.csv"
+    report_md_path: "data/1_5_horizon_recommendation/horizon_recommendations.md"
+    max_holdout_share: 0.20
+    min_train_length: 200
+    ideal_holdout_share: 0.15
+    unsafe_train_threshold: 190
+    h_short: 12
+    h_long: 96
+    short_series_h_short: 12
+    short_series_h_long: 24
+    # Experiment forecast horizons (samples). Split uses max(H) as the test tail.
+    experiment:
+      boiler_outlet_temp_univ.csv: [12, 96, 180, 720, 1440]
+      pump_sensor_28_univ.csv: [12, 96, 360, 1440]
+      vibration_sensor_S1.csv: [12, 24]
+    rolling_origins:
+      boiler_outlet_temp_univ.csv: 5
+      pump_sensor_28_univ.csv: 5
+      vibration_sensor_S1.csv: 3
+    seasonal_periods:
+      boiler_outlet_temp_univ.csv: 720
+      pump_sensor_28_univ.csv: 1440
+      vibration_sensor_S1.csv: 12
+
+# ============================================================================
+# DATASETS
+# ============================================================================
+datasets:
+  # Leave empty to auto-discover all CSV files in source_dir
+  # Or specify exact files to use
+  selected: []  # Empty = use all datasets from source_dir
+
+  # Short stems in data/3_missing_data and data/4_fixed_data → train file stems
+  aliases:
+    boiler: boiler_outlet_temp_univ
+    pump: pump_sensor_28_univ
+    vibr: vibration_sensor_S1
+  
+  # CSV format settings
+  format:
+    default:
+      separator: ","
+      decimal: "."
+      index_col: 0
+
+# ============================================================================
+# RECONSTRUCTION MODELS
+# ============================================================================
+reconstruction_models:
+  selected:
+    - impute_mean
+    - impute_median
+    - impute_ffill
+    - impute_bfill
+    - interpolate_linear
+    - interpolate_cubic
+    - interpolate_pchip
+    - knn
+    - sarimax
+    - stable_diffusion_2_gaf
+    - stable_diffusion_2_mtf
+    - stable_diffusion_2_rp
+    - stable_diffusion_2_spec
+    - stable_diffusion_2_gaf_finetuned
+    - stable_diffusion_2_mtf_finetuned
+    - stable_diffusion_2_rp_finetuned
+    - stable_diffusion_2_spec_finetuned
+  excluded: []
+
+# ============================================================================
+# RECONSTRUCTION ERROR METRICS (script 5 → reconstruction_results_*.csv)
+# ============================================================================
+reconstruction:
+  error_metrics:
+    # Which metrics to compute; empty list = all registered built-ins (mad, mae, rmse, r2, smape)
+    compute:
+      - mad
+      - mae
+      - smape
+    primary_metric: "smape"
+    # minimize | maximize | auto (auto uses each metric's registered direction)
+    primary_metric_objective: "auto"
+
+# ============================================================================
+# ============================================================================
+# PREDICTION SETTINGS
+# ============================================================================
+prediction:
+  # Whether to also predict on original training data (without reconstruction)
+  # This allows comparing: original train data vs reconstructed train data
+  predict_on_original_train: true
+  
+  # Whether to predict on reconstructed data (from 4_fixed_data)
+  # This is the main prediction task
+  predict_on_reconstructed: true
+
+  # Expanding-history evaluation inside the fixed test split. At later origins
+  # the model is refitted on train + the real test prefix revealed so far.
+  rolling_origins:
+    enabled: true
+    datasets:
+      - boiler_outlet_temp_univ
+      - pump_sensor_28_univ
+      - vibration_sensor_S1
+    models:
+      - xgboost
+      - sarimax
+      - prophet
+      - holt_winters
+      - persistence
+      - seasonal_naive
+      - xgboost_direct_missing
+    n_origins: 5
+    seed: 42
+    # Procesy są niezależne; XGBoost wewnątrz każdego procesu ma n_jobs=1.
+    max_workers: 20  # 16 rdzeni fizycznych, 32 logiczne; benchmark 16≈20<24
+    lead_time_bins: true
+
+  # Prediction error metrics (script 12 → prediction_results_*.csv); see src/prediction_metrics/
+  error_metrics:
+    compute: [mae, rmse, mase, mape, smape]
+    primary_metric: "smape"
+    # minimize | maximize | auto (auto uses each metric's registered direction; all built-ins → minimize)
+    primary_metric_objective: "auto"
+
+# ============================================================================
+# MISSINGNESS TECHNIQUES
+# ============================================================================
+missingness_techniques:
+  # Leave empty to use all available techniques from missingness_techniques/
+  # Or specify techniques to use:
+  # selected:
+  #   - "MCAR"
+  #   - "MAR"
+  selected: []  # Empty = use all available techniques
+  
+  # Available techniques (auto-discovered from missingness_techniques/):
+  # - MCAR (Missing Completely At Random)
+  # - MAR (Missing At Random)
+  # - MNAR (Missing Not At Random)
+
+# Temporal topology is independent of the MCAR/MAR/MNAR mechanism.
+missingness_structures:
+  selected:
+  - scattered
+  - contiguous
+  - mixed
+  contiguous:
+    min_block_length: 3
+    max_block_length: 24
+  mixed:
+    scattered_fraction: 0.5
+
+# ============================================================================
+# MISSINGNESS RATES
+# ============================================================================
+missingness_rates:
+  # Fractions of data to remove (0.0 to 1.0). Same grid as the article: 2/5/20/50%.
+  rates:
+  - 0.02   # 2%
+  - 0.05   # 5%
+  - 0.20   # 20%
+  - 0.50   # 50%
+
+  # Number of iterations (different random patterns per configuration)
+  iterations: 10
+  
+  # Random seed for reproducibility
+  seed: 42
+
+# ============================================================================
+# OPTIMIZATION (e.g. Stable Diffusion hyperparameters in src/optimization/)
+# ============================================================================
+optimization:
+  # Which reconstruction error metric to optimize (see src/reconstruction_metrics/)
+  # Built-ins: mad, mae, rmse, r2, smape; custom keys from register_reconstruction_metric()
+  reconstruction_metric: "smape"
+  # Direction for that metric during SD hyperparameter search (Optuna always minimizes internally):
+  # - "minimize" — lower metric value is better (typical for SMAPE, MAE, RMSE, MAD)
+  # - "maximize" — higher metric value is better (typical for R²)
+  # - "auto" — use the default convention registered for that metric in code
+  reconstruction_metric_objective: "auto"
+
+# ============================================================================
+# VISUALIZATION SETTINGS
+# ============================================================================
+visualization:
+  # Default metric in Streamlit reconstruction dashboard (must match a registered metric key)
+  default_metric: "smape"
+  # Optional override for prediction dashboard (defaults to prediction.error_metrics.primary_metric)
+  # default_prediction_metric: "mape"
+  show_top_n: 10
+
+# ============================================================================
+# COMPUTATION SETTINGS
+# ============================================================================
+computation:
+  # Parallel processing
+  # 20 workerów: dobrane do 16 rdzeni fizycznych / 32 logicznych i 123 GiB RAM
+  # n_jobs: 1 disables parallelization (sequential)
+  # n_jobs: N uses N cores
+  # Zadania GPU są wydzielane i wykonywane sekwencyjnie na jednej karcie
+  # TIP: If processes crash silently, try reducing n_jobs (e.g., 8 or 4)
+  n_jobs: 20
+  
+  # Stable Diffusion settings (if using SD models)
+  stable_diffusion:
+    seed: 42  # Explicit Diffusers generator seed; each local window increments it by one
+    num_inference_steps: 42
+    guidance_scale: 7.5
+    device: "cuda"  # "cuda" or "cpu"
+    # SD2 was trained natively at 512 px. Test 1024/2048 only through the
+    # optimization script; their VRAM cost grows approximately with pixel area.
+    image_size: 512
+    image_size_by_dataset: {}
+    # Created only by GPU optimization. If present, its dataset x model values
+    # override the conservative defaults below.
+    runtime_overrides_path: "data/1_6_sd2_optimization/sd2_runtime_overrides.json"
+    windowing:
+      enabled: true
+      default_window_samples: 512
+      context_samples: 64
+      # Filled from the optimization report when dataset-specific winners differ.
+      by_dataset:
+        boiler: 512
+        pump: 512
+        vibr: 512
+    prompts:
+      gaf: "high quality gramian angular field mathematical visualization"
+      mtf: "high quality markov transition field mathematical visualization"
+      rp: "high quality continuous recurrence distance plot mathematical visualization"
+      spec: "high quality spectrogram mathematical visualization"
+
+# ============================================================================
+# OVERWRITE SETTINGS
+# ============================================================================
+overwrite:
+  # Reconstruction phase (steps 3-5: degrade, reconstruct, calculate reconstruction errors)
+  # true = overwrite existing degraded/reconstructed files
+  # false = skip if files already exist
+  reconstruction: false
+  
+  # Prediction phase (steps 7-9: train models, predict, calculate error)
+  # true = retrain models and redo predictions even if they exist
+  # false = skip existing trained models and predictions
+  prediction: false
+
+# ============================================================================
+# EXAMPLES OF PRESET CONFIGURATIONS
+# ============================================================================
+# You can create multiple config files for different experiments:
+#
+# config_quick.yaml - Quick test with 1 dataset, 2 models, 1 technique
+# config_full.yaml - Full experiment with all datasets, all models
+# config_gpu.yaml - Only GPU-based models (Stable Diffusion)
+# config_traditional.yaml - Only traditional methods (no deep learning)
